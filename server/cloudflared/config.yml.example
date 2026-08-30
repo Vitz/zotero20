@@ -1,0 +1,10 @@
+# Skopiuj do /etc/cloudflared/config.yml na RPi i uzupełnij wartości.
+tunnel: <TUNNEL_UUID>
+credentials-file: /etc/cloudflared/<TUNNEL_UUID>.json
+
+ingress:
+  - hostname: zotero.zotero20.example.com
+    service: http://127.0.0.1:23119
+  - hostname: api.zotero20.example.com
+    service: http://127.0.0.1:8000
+  - service: http_status:404

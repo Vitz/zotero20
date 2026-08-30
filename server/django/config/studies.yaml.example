@@ -1,0 +1,8 @@
+# Skopiuj do studies.yaml i uzupełnij collection_key z Local API Zotero.
+studies:
+  badanie-1:
+    label: "Badanie 1"
+    collection_key: "REPLACE_WITH_ZOTERO_COLLECTION_KEY"
+  badanie-2:
+    label: "Badanie 2"
+    collection_key: "REPLACE_WITH_ZOTERO_COLLECTION_KEY"

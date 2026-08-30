@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.egg-info/
+
+# Node (connector build)
+node_modules/
+dist/
+*.crx
+
+# Secrets
+*.pem
+credentials.json
+cloudflared/*.json
+!cloudflared/config.yml.example
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Zotero local
+Zotero/
+
+# Apps Script
+.clasp.json

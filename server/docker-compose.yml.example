@@ -1,0 +1,53 @@
+# OPCJONALNIE — głównie x86_64 VPS, nie domyślna ścieżka na RPi5.
+# Zotero Desktop w Dockerze wymaga Xvfb/VNC i własnego obrazu (brak oficjalnego).
+# Na RPi5 użyj docs/deployment-rpi5.md (instalacja natywna arm64).
+#
+# Przed użyciem:
+# - zbuduj lub wskaż obraz z Zotero 8 + Xvfb
+# - zamontuj trwały wolumen na profil (zotero.sqlite + storage/)
+# - NIE publikuj portu 23119 na hoście — tylko cloudflared w tej samej sieci
+
+services:
+  zotero:
+    # image: zotero20/zotero-xvfb:latest  # TODO: Dockerfile w Fazie 1b
+    build:
+      context: ./docker/zotero
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - zotero-profile:/home/zotero/Zotero
+    environment:
+      DISPLAY: ":99"
+    networks:
+      - zotero20-internal
+    # Brak sekcji ports — API tylko wewnątrz sieci docker
+
+  django:
+    build:
+      context: ./django
+    restart: unless-stopped
+    environment:
+      ZOTERO_URL: http://zotero:23119
+    depends_on:
+      - zotero
+    networks:
+      - zotero20-internal
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+    depends_on:
+      - zotero
+      - django
+    networks:
+      - zotero20-internal
+
+networks:
+  zotero20-internal:
+    driver: bridge
+
+volumes:
+  zotero-profile:

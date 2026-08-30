@@ -11,6 +11,29 @@ Użytkownik pisze w Google Docs i ma:
 
 Oficjalna wtyczka Zotero w Google Docs **nie** obsługuje zdalnego serwera. Wymaga fork Connectora + tunelu do instancji Zotero Desktop na RPi5.
 
+### Co się NIE zmienia (gwarancja funkcji)
+
+Przenosimy **tylko storage i silnik** na serwer — **nie** przepisujemy CSL ani logiki numeracji.
+
+| Funkcja | Status |
+|---------|--------|
+| Add/Edit Citation, Bibliography | bez zmian |
+| **Refresh** (cytowania + metadane) | bez zmian — citing protocol na serwerze |
+| Zmiana stylu, numeracja [1][2][3], ibid. | citeproc-js w Zotero Desktop na RPi |
+| Szybkie dodawanie źródeł | **nowe** — sidebar ORCID/DOI → API |
+
+Szczegóły instalacji w Docs: **[docs/google-docs-setup.md](docs/google-docs-setup.md)**  
+API Zotero + Docker vs native: **[docs/zotero-api-and-docker.md](docs/zotero-api-and-docker.md)**
+
+---
+
+## Jak dodać do Google Docs (skrót)
+
+1. **Fork Zotero Connector** (Chrome/Firefox, Load unpacked) — menu **Zotero** w Docs, Refresh, bibliografia. Zastępuje oficjalny Connector; `connector.url` → tunel CF.
+2. **Add-on Apps Script** (sidebar) — import ORCID/DOI do kolekcji „badanie 1”. Osobny element; nie zastępuje menu Zotero.
+
+Bez fork Connectora **nie ma** Refresh przez serwer. Bez sidebara nadal możesz cytować — ale źródła dodajesz ręcznie w Zotero na serwerze.
+
 ---
 
 ## Architektura wysokiego poziomu
@@ -64,11 +87,13 @@ Przepływ B **nie przechodzi przez Django** — Connector rozmawia bezpośrednio
 zotero20/
 ├── README.md                 # ten plik
 ├── docs/
-│   ├── architecture.md       # szczegóły techniczne
-│   ├── security.md           # CF Access, tokeny, zagrożenia
-│   └── deployment-rpi5.md    # instalacja krok po kroku na RPi
+│   ├── architecture.md           # szczegóły techniczne
+│   ├── google-docs-setup.md      # jak podłączyć Docs (Connector + sidebar)
+│   ├── zotero-api-and-docker.md  # warstwy API, Docker vs native RPi
+│   ├── security.md               # CF Access, tokeny, zagrożenia
+│   └── deployment-rpi5.md        # instalacja krok po kroku na RPi
 ├── server/
-│   ├── docker-compose.yml    # opcjonalnie: xvfb + zotero (jeśli bez natywnej instalacji)
+│   ├── docker-compose.yml.example  # opcjonalnie x86 VPS; RPi → native
 │   ├── cloudflared/          # config tunelu
 │   └── django/               # mikroserwis ORCID + mapowanie kolekcji
 │       ├── manage.py
@@ -381,11 +406,12 @@ Secrets w **Script Properties** (nie w kodzie źródłowym).
 
 ## Decyzje architektoniczne (ADR skrót)
 
-1. **Zotero Desktop na serwerze, nie Web API** — zachowujemy citeproc i citing protocol bez przepisywania CSL.
+1. **Zotero Desktop na serwerze, nie Web API** — citing protocol (`/connector/document/*`) daje Refresh i bibliografię; Web API tego nie ma.
 2. **Django tylko do importu** — cytowania nie przechodzą przez Django (latency, złożoność).
-3. **Fork Connectora konieczny** — oficjalny nie wspiera CF Access headers.
-4. **RPi5 natywnie arm64** — bez emulacji x86; Zotero 8 ma oficjalny build arm64.
-5. **Kolekcje = zakładki badań** — proste mapowanie `study_slug → collectionKey`.
+3. **Fork Connectora konieczny** (AGPL, `npm run build`) — oficjalny nie wspiera zdalnego URL + CF Access headers.
+4. **RPi5 natywnie arm64** — Docker możliwy na x86, na RPi rekomendujemy native; Zotero 8 ma oficjalny build arm64.
+5. **Local API + zotero-api-plus** — szybki import DOI; ORCID przez Django → DOI → `add-item-by-id`.
+6. **Kolekcje = zakładki badań** — proste mapowanie `study_slug → collectionKey`.
 
 ---
 

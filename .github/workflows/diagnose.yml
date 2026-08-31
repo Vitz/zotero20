@@ -38,5 +38,6 @@ jobs:
             systemctl is-active cloudflared 2>/dev/null || true
             ls -la /etc/cloudflared/ 2>/dev/null || true
             ls -la ~/.cloudflared/ 2>/dev/null || true
-            echo "=== listening 8089 ==="
-            ss -tlnp | grep 8089 || true
+            echo "=== docx2pdf caddy ==="
+            docker inspect docx2pdf-caddy-1 --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' 2>/dev/null || true
+            find /home -maxdepth 4 -name 'Caddyfile' 2>/dev/null | head -5 || true

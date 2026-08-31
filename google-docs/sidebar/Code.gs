@@ -39,6 +39,50 @@ function getLastStatus() {
   return PropertiesService.getDocumentProperties().getProperty('lastImport') || '';
 }
 
+/**
+ * Wyciąga klucz pozycji Zotero z odpowiedzi add-item-by-id / Local API.
+ * Używane przez sidebar do komunikatu z Connectorem (postMessage).
+ */
+function extractItemKey(result) {
+  return extractItemKey_(result);
+}
+
+function extractItemKey_(result) {
+  if (!result || typeof result !== 'object') {
+    return '';
+  }
+  if (result.key) {
+    return String(result.key);
+  }
+  if (result.itemKey) {
+    return String(result.itemKey);
+  }
+
+  var nested = result.result;
+  if (!nested || typeof nested !== 'object') {
+    return '';
+  }
+  if (nested.key) {
+    return String(nested.key);
+  }
+  if (nested.itemKey) {
+    return String(nested.itemKey);
+  }
+  if (nested.success && typeof nested.success === 'object') {
+    var keys = Object.keys(nested.success);
+    for (var i = 0; i < keys.length; i++) {
+      var entry = nested.success[keys[i]];
+      if (entry && entry.key) {
+        return String(entry.key);
+      }
+    }
+  }
+  if (Array.isArray(nested) && nested.length && nested[0].key) {
+    return String(nested[0].key);
+  }
+  return '';
+}
+
 function apiGet(path) {
   const response = UrlFetchApp.fetch(API_BASE + path, {
     method: 'get',

@@ -15,3 +15,9 @@ Pliki `.patch` nakładane przez `setup.sh` na sklonowane repo upstream.
 - Wartości z `chrome.storage.local` (Options page) lub build-time `config.json`
 
 Logika Google Docs **nie jest zmieniana** — tylko transport HTTP.
+
+## 003-sidebar-postmessage.patch.md
+
+- Nasłuch `postMessage` z panelu `Zotero20 Import` → `addEditCitation`
+- Szczegóły: `003-sidebar-postmessage.patch.md`
+- **Status:** planowany, nie w `setup.sh`

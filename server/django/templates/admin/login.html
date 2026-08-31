@@ -1,0 +1,46 @@
+{% extends "admin/login.html" %}
+{% load i18n static %}
+
+{% block extrahead %}
+{{ block.super }}
+{% if captcha_type == "hcaptcha" and hcaptcha_sitekey %}
+<script src="https://js.hcaptcha.com/1/api.js" async defer></script>
+<style>
+  .hcaptcha-wrap { margin: 1em 0; }
+  .hp-field { position:absolute;left:-9999px;height:0;width:0;overflow:hidden; }
+</style>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<form action="{{ app_path }}" method="post" id="login-form">{% csrf_token %}
+  <div class="form-row">
+    {{ form.username.errors }}
+    {{ form.username.label_tag }} {{ form.username }}
+  </div>
+  <div class="form-row">
+    {{ form.password.errors }}
+    {{ form.password.label_tag }} {{ form.password }}
+  </div>
+  {% if form.website_url %}
+  <div class="hp-field">{{ form.website_url }}</div>
+  {% endif %}
+  {% if captcha_type == "simple" and form.captcha %}
+  <div class="form-row">{{ form.captcha.errors }} {{ form.captcha.label_tag }} {{ form.captcha }}</div>
+  {% endif %}
+  {% if captcha_type == "recaptcha" and form.captcha %}
+  <div class="form-row">{{ form.captcha }}</div>
+  {% endif %}
+  {% if captcha_type == "hcaptcha" and hcaptcha_sitekey %}
+  <div class="hcaptcha-wrap">
+    <div class="h-captcha" data-sitekey="{{ hcaptcha_sitekey }}" data-callback="onHcaptchaOk"></div>
+    {{ form.captcha.as_hidden }}
+  </div>
+  <script>function onHcaptchaOk(t){document.getElementById('id_captcha').value=t;}</script>
+  {% endif %}
+  <div class="submit-row">
+    <input type="submit" value="{% translate 'Log in' %}">
+    <input type="hidden" name="next" value="{{ next }}">
+  </div>
+</form>
+{% endblock %}

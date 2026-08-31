@@ -1,0 +1,66 @@
+# Produkcja RPi5 — izolowany stack „zotero20”
+# Na RPi: tylko PULL gotowych obrazów z GHCR (bez build).
+#
+# Wymagane w server/.env (lub export przed deploy):
+#   ZOTERO20_IMAGE_ZOTERO=ghcr.io/OWNER/zotero20-zotero:TAG
+#   ZOTERO20_IMAGE_DJANGO=ghcr.io/OWNER/zotero20-django:TAG
+#
+# Opcjonalnie (jeśli masz już cloudflared na hoście):
+#   ZOTERO20_ENABLE_CLOUDFLARED=0
+
+name: zotero20
+
+services:
+  zotero:
+    image: ${ZOTERO20_IMAGE_ZOTERO:?ustaw ZOTERO20_IMAGE_ZOTERO}
+    pull_policy: always
+    container_name: zotero20-zotero
+    restart: unless-stopped
+    volumes:
+      - zotero-profile:/home/zotero/Zotero
+    ports:
+      - "127.0.0.1:${ZOTERO20_HOST_PORT:-8089}:8000"
+    shm_size: "512m"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:23119/connector/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 20
+      start_period: 180s
+
+  django:
+    image: ${ZOTERO20_IMAGE_DJANGO:?ustaw ZOTERO20_IMAGE_DJANGO}
+    pull_policy: always
+    container_name: zotero20-django
+    restart: unless-stopped
+    network_mode: "service:zotero"
+    depends_on:
+      zotero:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      ZOTERO_URL: http://127.0.0.1:23119
+      STUDIES_CONFIG: /app/config/studies.yaml
+    volumes:
+      - ./django/config/studies.yaml:/app/config/studies.yaml:ro
+      - django-data:/app/data
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: zotero20-cloudflared
+    profiles: ["cloudflared"]
+    restart: unless-stopped
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+    network_mode: host
+    depends_on:
+      zotero:
+        condition: service_healthy
+
+volumes:
+  zotero-profile:
+    name: zotero20-zotero-profile
+  django-data:
+    name: zotero20-django-data

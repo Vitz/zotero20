@@ -1,10 +1,8 @@
-# Skopiuj do /etc/cloudflared/config.yml na RPi i uzupełnij wartości.
-tunnel: <TUNNEL_UUID>
-credentials-file: /etc/cloudflared/<TUNNEL_UUID>.json
+# Jeden hostname — cały ruch przez Django (gateway + proxy Zotero).
+tunnel: bd920f3c-4b0a-49bd-9867-0b507e52356b
+credentials-file: /etc/cloudflared/bd920f3c-4b0a-49bd-9867-0b507e52356b.json
 
 ingress:
-  - hostname: zotero.zotero20.example.com
-    service: http://127.0.0.1:23119
-  - hostname: api.zotero20.example.com
-    service: http://127.0.0.1:8000
+  - hostname: zotero.keyweb.pl
+    service: http://127.0.0.1:8089
   - service: http_status:404

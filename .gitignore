@@ -16,6 +16,9 @@ dist/
 credentials.json
 cloudflared/*.json
 !cloudflared/config.yml.example
+server/.env
+server/django/config/studies.yaml
+!server/django/config/studies.yaml.example
 
 # OS / IDE
 .DS_Store

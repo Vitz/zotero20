@@ -1,0 +1,87 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: ci
+    uses: ./.github/workflows/publish-images.yml
+    secrets: inherit
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      IMAGE_OWNER: ${{ vars.GHCR_OWNER || github.repository_owner }}
+      IMAGE_PREFIX: ${{ vars.GHCR_IMAGE_PREFIX || 'zotero20' }}
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse SSH target
+        id: ssh
+        run: |
+          raw="${{ vars.DEPLOY_HOST }}"
+          raw="${raw#http://}"
+          raw="${raw#https://}"
+          host="${raw%%:*}"
+          # 8089 w DEPLOY_HOST to port HTTP (tunel CF), NIE SSH
+          port="${{ vars.PORT || vars.DEPLOY_SSH_PORT }}"
+          if [ -z "$port" ]; then port="22"; fi
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+          echo "port=$port" >> "$GITHUB_OUTPUT"
+          echo "SSH → ${host}:${port} (HTTP zotero: :8089 via tunel)"
+
+      - name: Deploy stack on RPi (pull images only)
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_ZOTERO: ghcr.io/${{ env.IMAGE_OWNER }}/${{ env.IMAGE_PREFIX }}-zotero:${{ env.IMAGE_TAG }}
+          IMAGE_DJANGO: ghcr.io/${{ env.IMAGE_OWNER }}/${{ env.IMAGE_PREFIX }}-django:${{ env.IMAGE_TAG }}
+        with:
+          host: ${{ steps.ssh.outputs.host }}
+          port: ${{ steps.ssh.outputs.port }}
+          username: ${{ vars.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          command_timeout: 15m
+          envs: IMAGE_ZOTERO,IMAGE_DJANGO
+          script: |
+            set -euo pipefail
+            DEPLOY_ROOT="${{ vars.DEPLOY_PATH }}"
+            mkdir -p "${DEPLOY_ROOT}"
+            if [ ! -d "${DEPLOY_ROOT}/.git" ]; then
+              git clone https://github.com/${{ github.repository }}.git "${DEPLOY_ROOT}"
+            fi
+            cd "${DEPLOY_ROOT}"
+            git fetch origin main
+            git reset --hard origin/main
+            chmod +x stack/scripts/*.sh
+            export ZOTERO20_IMAGE_ZOTERO="${IMAGE_ZOTERO}"
+            export ZOTERO20_IMAGE_DJANGO="${IMAGE_DJANGO}"
+            export GHCR_PULL_TOKEN="${{ secrets.GHCR_PULL_TOKEN }}"
+            export GHCR_PULL_USER="${{ vars.GHCR_OWNER || github.repository_owner }}"
+            cd stack && ./scripts/deploy.sh
+
+      - name: Smoke test
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ steps.ssh.outputs.host }}
+          port: ${{ steps.ssh.outputs.port }}
+          username: ${{ vars.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            export ZOTERO_BASE=http://127.0.0.1:8089
+            export ZOTERO20_API_KEY="${{ secrets.ZOTERO20_API_KEY }}"
+            cd "${{ vars.DEPLOY_PATH }}/stack"
+            ./scripts/test-api.sh

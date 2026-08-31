@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 13px; margin: 12px; color: #222; }
+    h2 { font-size: 15px; margin: 0 0 8px; }
+    label { display: block; margin-top: 10px; font-weight: bold; }
+    input, select { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 6px; }
+    button { margin-top: 12px; width: 100%; padding: 8px; cursor: pointer; }
+    .tab { display: none; }
+    .tab.active { display: block; }
+    .tabs button { width: auto; margin-right: 4px; margin-top: 0; }
+    #status { margin-top: 14px; padding: 8px; background: #f5f5f5; border-radius: 4px; white-space: pre-wrap; font-size: 12px; }
+    .error { color: #b00020; }
+    .ok { color: #0a7a2f; }
+  </style>
+</head>
+<body>
+  <h2>Zotero20 Import</h2>
+  <p>Importuj źródła do kolekcji na serwerze. Cytowania dodajesz menu <strong>Zotero</strong> w Docs (fork Connector).</p>
+
+  <div class="tabs">
+    <button type="button" onclick="showTab('doi')">DOI</button>
+    <button type="button" onclick="showTab('orcid')">ORCID</button>
+    <button type="button" onclick="showTab('status')">Status</button>
+  </div>
+
+  <div id="tab-doi" class="tab active">
+    <label for="doi">DOI</label>
+    <input id="doi" type="text" placeholder="10.1038/nature12373">
+    <label for="study-doi">Badanie</label>
+    <select id="study-doi"></select>
+    <button type="button" onclick="doImportDoi()">Importuj DOI</button>
+  </div>
+
+  <div id="tab-orcid" class="tab">
+    <label for="orcid">ORCID</label>
+    <input id="orcid" type="text" placeholder="0000-0002-1825-0097">
+    <label for="study-orcid">Badanie</label>
+    <select id="study-orcid"></select>
+    <label for="limit">Limit prac</label>
+    <input id="limit" type="number" value="50" min="1" max="200">
+    <button type="button" onclick="doImportOrcid()">Importuj prace ORCID</button>
+  </div>
+
+  <div id="tab-status" class="tab">
+    <button type="button" onclick="loadStatus()">Odśwież status</button>
+    <pre id="status-text"></pre>
+  </div>
+
+  <div id="status"></div>
+
+  <script>
+    function showTab(name) {
+      document.querySelectorAll('.tab').forEach(function (el) { el.classList.remove('active'); });
+      document.getElementById('tab-' + name).classList.add('active');
+      if (name === 'status') loadStatus();
+    }
+
+    function setStatus(msg, isError) {
+      var el = document.getElementById('status');
+      el.textContent = msg;
+      el.className = isError ? 'error' : 'ok';
+    }
+
+    function fillStudies(studies) {
+      ['study-doi', 'study-orcid'].forEach(function (id) {
+        var sel = document.getElementById(id);
+        sel.innerHTML = '';
+        studies.forEach(function (s) {
+          var opt = document.createElement('option');
+          opt.value = s.slug;
+          opt.textContent = s.label + (s.configured ? '' : ' (brak collection_key)');
+          sel.appendChild(opt);
+        });
+      });
+    }
+
+    function loadStudies() {
+      google.script.run
+        .withSuccessHandler(function (data) {
+          fillStudies(data.studies || []);
+        })
+        .withFailureHandler(function (e) { setStatus('Błąd ładowania badań: ' + e.message, true); })
+        .getStudies();
+    }
+
+    function doImportDoi() {
+      var doi = document.getElementById('doi').value.trim();
+      var study = document.getElementById('study-doi').value;
+      if (!doi) { setStatus('Podaj DOI.', true); return; }
+      setStatus('Importuję…');
+      google.script.run
+        .withSuccessHandler(function (r) {
+          setStatus('Dodano DOI: ' + r.doi + ' → ' + r.study);
+        })
+        .withFailureHandler(function (e) { setStatus(e.message, true); })
+        .importDoi(doi, study);
+    }
+
+    function doImportOrcid() {
+      var orcid = document.getElementById('orcid').value.trim();
+      var study = document.getElementById('study-orcid').value;
+      var limit = parseInt(document.getElementById('limit').value, 10) || 50;
+      if (!orcid) { setStatus('Podaj ORCID.', true); return; }
+      setStatus('Importuję prace ORCID… (może potrwać)');
+      google.script.run
+        .withSuccessHandler(function (r) {
+          var s = r.summary || {};
+          setStatus('ORCID: dodano ' + (s.added_count || 0) + ', pominięto ' + (s.skipped_count || 0) + ', błędy ' + (s.error_count || 0));
+        })
+        .withFailureHandler(function (e) { setStatus(e.message, true); })
+        .importOrcid(orcid, study, limit);
+    }
+
+    function loadStatus() {
+      google.script.run
+        .withSuccessHandler(function (t) {
+          document.getElementById('status-text').textContent = t || '(brak ostatniego importu)';
+        })
+        .withFailureHandler(function (e) {
+          document.getElementById('status-text').textContent = e.message;
+        })
+        .getLastStatus();
+    }
+
+    loadStudies();
+  </script>
+</body>
+</html>

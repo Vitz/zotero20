@@ -1,0 +1,47 @@
+# Lokalny dev — build z Dockerfile (bez GHCR).
+
+name: zotero20-dev
+
+services:
+  zotero:
+    build:
+      context: ./docker/zotero
+      dockerfile: Dockerfile
+    container_name: zotero20-zotero
+    restart: unless-stopped
+    volumes:
+      - zotero-profile:/home/zotero/Zotero
+    ports:
+      - "8000:8000"
+    shm_size: "512m"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:23119/connector/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
+  django:
+    build:
+      context: ./django
+      dockerfile: Dockerfile
+    container_name: zotero20-django
+    restart: unless-stopped
+    network_mode: "service:zotero"
+    depends_on:
+      zotero:
+        condition: service_healthy
+    environment:
+      ZOTERO_URL: http://127.0.0.1:23119
+      DJANGO_DEBUG: "true"
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,zotero.keyweb.pl,django
+      STUDIES_CONFIG: /app/config/studies.yaml
+      ZOTERO20_API_KEY: ${ZOTERO20_API_KEY:-dev-api-key-change-me}
+      CAPTCHA_TYPE: ${CAPTCHA_TYPE:-simple}
+    volumes:
+      - ./django/config:/app/config:ro
+      - django-data:/app/data
+
+volumes:
+  zotero-profile:
+  django-data:

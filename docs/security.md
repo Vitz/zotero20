@@ -14,31 +14,31 @@ Zotero celowo binduje tylko `127.0.0.1`. Projekt zotero20 używa reverse proxy (
 
 ## Warstwy ochrony
 
-### 1. Cloudflare Access (obowiązkowe)
+### 1. Django gateway (główna)
 
-- Każdy hostname (`zotero.*`, `api.*`) za Access Application.
-- Domyślna polityka: **deny all**, allow tylko Service Token lub konkretni użytkownicy IdP.
-- Brak publicznego bypass.
+- Jeden publiczny punkt: `zotero.keyweb.pl` → Django `:8000`.
+- Zotero (`:23119`) **nigdy** nie trafia na tunel — tylko proxy wewnętrzne.
+- **X-API-Key** wymagany dla:
+  - `/connector/*` (fork Connectora, cytowania Docs)
+  - `/api/v1/*` (import ORCID/DOI, sidebar GAS)
+  - `/api/users/*`, `/api/plus/*` (Local API przez proxy)
 
-### 2. Service Tokeny — rozdzielenie
+### 2. Panel admin `/app/`
 
-| Token | Użycie | Rotacja |
-|-------|--------|---------|
-| `connector-token` | Fork Zotero Connector (wbudowany w build lub config) | Co 90 dni |
-| `gas-token` | Google Apps Script (Script Properties) | Co 90 dni |
-| `admin-token` | Ręczne curl / CI smoke tests | Po użyciu |
+- Brak rejestracji publicznej — tylko `createsuperuser`.
+- **Honeypot** na formularzu logowania.
+- **Captcha** (`CAPTCHA_TYPE`): `none` | `simple` | `recaptcha` | `hcaptcha`.
+- Klucze captcha w `.env` — patrz `server/.env.example`.
 
-Nie używaj jednego tokenu wszędzie — kompromitacja GAS nie powinna wystarczyć do pełnego dostępu Connectora jeśli polityki są rozdzielone (opcjonalnie osobne Access Apps).
+### 3. Cloudflare Access (opcjonalnie, dodatkowa warstwa)
 
-### 3. Django — dodatkowy API key (zalecane)
-
-Cloudflare Access + nagłówek `X-API-Key` znany tylko GAS i adminom. Chroni przed nadużyciem jeśli token CF wycieknie z jednego kanału.
+- Można zostawić przed Django jako defense in depth.
+- Bez CF Access nadal chroni **API key** — nie wystawiaj bez `ZOTERO20_API_KEY`.
 
 ### 4. Sieć RPi
 
-- Brak port forwarding 23119/8000 na routerze.
-- SSH tylko kluczem; fail2ban opcjonalnie.
-- Aktualizacje systemu: unattended-upgrades.
+- Brak port forwarding 23119/8000 na routerze (tylko tunel → 8000).
+- SSH kluczem; aktualizacje systemu.
 
 ## Co NIE robić
 

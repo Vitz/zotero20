@@ -1,0 +1,54 @@
+name: Deploy stack
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Tag obrazów GHCR (sha lub latest)"
+        required: true
+        default: "latest"
+
+concurrency:
+  group: zotero20-stack-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Parse SSH target
+        id: ssh
+        run: |
+          raw="${{ vars.DEPLOY_HOST }}"
+          raw="${raw#http://}"
+          raw="${raw#https://}"
+          host="${raw%%:*}"
+          # DEPLOY_HOST może być mylący (8089 to HTTP, nie SSH) — użyj DEPLOY_SSH_PORT
+          port="${{ vars.PORT || vars.DEPLOY_SSH_PORT }}"
+          if [ -z "$port" ]; then port="22"; fi
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+          echo "port=$port" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy on RPi
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          IMAGE_OWNER: ${{ vars.GHCR_OWNER || github.repository_owner }}
+          IMAGE_PREFIX: ${{ vars.GHCR_IMAGE_PREFIX || 'zotero20' }}
+        with:
+          host: ${{ steps.ssh.outputs.host }}
+          port: ${{ steps.ssh.outputs.port }}
+          username: ${{ vars.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          command_timeout: 12m
+          envs: IMAGE_TAG,IMAGE_OWNER,IMAGE_PREFIX
+          script: |
+            set -euo pipefail
+            cd "${{ vars.DEPLOY_PATH }}"
+            git pull origin main
+            export ZOTERO20_IMAGE_ZOTERO="ghcr.io/${IMAGE_OWNER}/${IMAGE_PREFIX}-zotero:${IMAGE_TAG}"
+            export ZOTERO20_IMAGE_DJANGO="ghcr.io/${IMAGE_OWNER}/${IMAGE_PREFIX}-django:${IMAGE_TAG}"
+            export GHCR_PULL_TOKEN="${{ secrets.GHCR_PULL_TOKEN }}"
+            chmod +x scripts/*.sh
+            ./scripts/deploy.sh

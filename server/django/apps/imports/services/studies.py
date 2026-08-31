@@ -17,13 +17,27 @@ def load_studies() -> dict:
             f"Brak pliku konfiguracji badań: {path}. "
             "Skopiuj config/studies.yaml.example do config/studies.yaml."
         )
+    if path.is_dir():
+        raise StudiesConfigError(
+            f"{path} jest katalogiem, a powinien być plikiem YAML. "
+            "Usuń katalog i utwórz plik: cp config/studies.yaml.example config/studies.yaml"
+        )
 
     with path.open(encoding="utf-8") as handle:
         data = yaml.safe_load(handle) or {}
 
-    studies = data.get("studies") or {}
+    studies = data.get("studies")
+    if studies is None:
+        if data and not isinstance(data, dict):
+            raise StudiesConfigError("Plik studies.yaml ma nieprawidłowy format.")
+        raise StudiesConfigError(
+            "Plik studies.yaml nie zawiera sekcji 'studies:'. "
+            "Użyj struktury jak w studies.yaml.example (studies → slug → label, collection_key)."
+        )
     if not studies:
-        raise StudiesConfigError("Plik studies.yaml nie zawiera sekcji 'studies'.")
+        raise StudiesConfigError(
+            "Sekcja 'studies' w studies.yaml jest pusta. Dodaj co najmniej jedno badanie."
+        )
 
     return studies
 
@@ -47,7 +61,7 @@ def get_collection_key(study_slug: str) -> str:
 
 def list_studies() -> list[dict]:
     studies = load_studies()
-    return [
+    items = [
         {
             "slug": slug,
             "label": entry.get("label", slug),
@@ -59,3 +73,5 @@ def list_studies() -> list[dict]:
         }
         for slug, entry in studies.items()
     ]
+    items.sort(key=lambda item: item["label"].lower())
+    return items

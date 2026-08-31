@@ -1,3 +1,16 @@
+# Mapowanie badań → kolekcje Zotero (Local API).
+#
+# 1. Skopiuj:  cp config/studies.yaml.example config/studies.yaml
+# 2. Utwórz kolekcje w Zotero Desktop (UI lub istniejące).
+# 3. Pobierz collection_key (8-znakowy klucz Zotero):
+#      docker compose -p zotero20 exec zotero \
+#        curl -s http://127.0.0.1:23119/api/users/0/collections
+#    (na hoście z Zotero: curl http://127.0.0.1:23119/api/users/0/collections)
+# 4. Wklej prawdziwy klucz zamiast REPLACE_WITH_ZOTERO_COLLECTION_KEY.
+# 5. slug (np. badanie-1) wysyła sidebar/Connector — musi się zgadzać z polem "study" w API.
+#
+# Panel importu pokazuje tylko badania z ustawionym collection_key (nie REPLACE_*).
+
 studies:
   badanie-1:
     label: "Badanie 1"

@@ -60,3 +60,18 @@ Google Docs
          │
          └── postMessage ──► Connector (planowane: auto addEditCitation)
 ```
+
+## Troubleshooting: pusta lista badań / „Wymagane pola: doi, study.”
+
+| Objaw | Przyczyna | Rozwiązanie |
+|-------|-----------|-------------|
+| Dropdown „Badanie” pusty lub szary | `/api/v1/studies` zwraca błąd lub pustą listę | Skonfiguruj `studies.yaml` na serwerze (patrz `docs/deploy-mikrus.md`) |
+| „Nieprawidłowy klucz API” przy otwarciu panelu | Zły `ZOTERO20_API_KEY` w Script Properties | Ustaw ten sam klucz co w `.env` na Mikrusie |
+| Badania widoczne, ale „(brak collection_key)” | Placeholder `REPLACE_*` w YAML | Wklej prawdziwy `collection_key` z Zotero Local API |
+| Import bez wybranego badania | Kliknięto import przed załadowaniem listy | Poczekaj na „Załadowano N badań” i wybierz badanie |
+
+Test z serwera:
+
+```bash
+curl -sS -H "X-API-Key: $ZOTERO20_API_KEY" https://zotero.keyweb.pl/api/v1/studies
+```

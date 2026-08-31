@@ -22,4 +22,19 @@ echo "== health =="
 curl -sS "$BASE/api/v1/health"
 echo
 
+echo "== studies (wymaga X-API-Key) =="
+STUDIES_JSON=$(curl -sS "${HDR[@]}" "$BASE/api/v1/studies")
+echo "$STUDIES_JSON"
+if echo "$STUDIES_JSON" | grep -q '"studies"'; then
+  CONFIGURED=$(echo "$STUDIES_JSON" | grep -o '"configured": true' | wc -l | tr -d ' ')
+  if [ "${CONFIGURED:-0}" -eq 0 ]; then
+    echo "UWAGA: brak skonfigurowanych badań (collection_key w studies.yaml)"
+    exit 1
+  fi
+else
+  echo "BŁĄD: endpoint /api/v1/studies nie zwrócił listy badań"
+  exit 1
+fi
+echo
+
 echo "OK"

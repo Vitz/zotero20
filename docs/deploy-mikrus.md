@@ -102,6 +102,65 @@ Secrets: `DEPLOY_SSH_KEY`, `ZOTERO20_API_KEY`
 
 ---
 
+## Konfiguracja badań (`studies.yaml`)
+
+Panel importu w Google Docs i endpoint `POST /api/v1/import/doi` wymagają pola **`study`** — slug z tego pliku. Bez prawdziwych `collection_key` lista badań w sidebarze będzie pusta lub niewybieralna.
+
+### 1. Edytuj plik na Mikrusie
+
+```bash
+ssh -p 10283 deploy@wanda283.mikrus.xyz
+cd ~/zotero20-stack
+nano config/studies.yaml
+```
+
+Przykład (dostosuj nazwy i klucze):
+
+```yaml
+studies:
+  badanie-1:
+    label: "Badanie 1"
+    collection_key: "ABC12XYZ"
+  badanie-2:
+    label: "Badanie 2"
+    collection_key: "DEF34UVW"
+```
+
+- **`slug`** (`badanie-1`) — identyfikator w API i sidebarze; tylko małe litery, cyfry, myślniki.
+- **`label`** — czytelna nazwa w dropdownie.
+- **`collection_key`** — 8-znakowy klucz kolekcji Zotero (nie nazwa folderu).
+
+### 2. Pobierz `collection_key` z Zotero
+
+Po starcie kontenerów Zotero:
+
+```bash
+cd ~/zotero20-stack
+docker compose -p zotero20 exec zotero \
+  curl -s http://127.0.0.1:23119/api/users/0/collections
+```
+
+W odpowiedzi JSON szukaj `"key"` przy `"name"` kolekcji. Wklej ten klucz do `collection_key`.
+
+### 3. Sprawdź endpoint
+
+```bash
+source .env
+curl -sS -H "X-API-Key: $ZOTERO20_API_KEY" http://127.0.0.1:8089/api/v1/studies
+```
+
+Oczekiwane: `"studies": [...]` z co najmniej jednym wpisem `"configured": true`.
+
+Plik jest montowany do kontenera Django (`read-only`) — **restart nie jest wymagany**, zmiany działają od razu.
+
+### 4. Google Docs sidebar
+
+W Apps Script (Script Properties) musi być ten sam **`ZOTERO20_API_KEY`** co w `.env` na serwerze. Po zmianie `studies.yaml` zamknij i otwórz panel importu ponownie.
+
+Typowy błąd **`Wymagane pola: doi, study.`** = pusta lista badań (brak/niepoprawny `studies.yaml` lub zły klucz API przy ładowaniu `/api/v1/studies`).
+
+---
+
 ## Test po deploy
 
 ```bash

@@ -74,7 +74,26 @@ jobs:
             export ZOTERO20_IMAGE_DJANGO="${IMAGE_DJANGO}"
             export GHCR_PULL_TOKEN="${{ secrets.GHCR_PULL_TOKEN }}"
             export GHCR_PULL_USER="${{ vars.GHCR_OWNER || github.repository_owner }}"
-            cd stack && ./scripts/deploy.sh
+            cd stack
+            if [ ! -f .env ]; then
+              cp .env.example .env
+            fi
+            set_env() {
+              key="$1"
+              val="$2"
+              if grep -q "^${key}=" .env; then
+                sed -i "s|^${key}=.*|${key}=${val}|" .env
+              else
+                echo "${key}=${val}" >> .env
+              fi
+            }
+            set_env ZOTERO20_API_KEY "${{ secrets.ZOTERO20_API_KEY }}"
+            set_env DJANGO_SECRET_KEY "${{ secrets.DJANGO_SECRET_KEY }}"
+            set_env ZOTERO20_HOST_PORT "8089"
+            set_env DJANGO_ALLOWED_HOSTS "zotero.keyweb.pl,localhost,127.0.0.1"
+            set_env ZOTERO20_IMAGE_ZOTERO "${IMAGE_ZOTERO}"
+            set_env ZOTERO20_IMAGE_DJANGO "${IMAGE_DJANGO}"
+            ./scripts/deploy.sh
 
       - name: Smoke test
         uses: appleboy/ssh-action@v1.2.0

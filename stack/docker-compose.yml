@@ -17,7 +17,8 @@ services:
     volumes:
       - zotero-profile:/home/zotero/Zotero
     ports:
-      - "127.0.0.1:${ZOTERO20_HOST_PORT:-8089}:8000"
+      # 0.0.0.0 — Caddy docx2pdf łączy się przez 172.17.0.1:8089 (nie działa z bind 127.0.0.1)
+      - "${ZOTERO20_HOST_PORT:-8089}:8000"
     shm_size: "512m"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:23119/connector/ping"]

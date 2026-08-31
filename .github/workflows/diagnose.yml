@@ -1,0 +1,42 @@
+name: Diagnose remote
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Parse SSH target
+        id: ssh
+        run: |
+          raw="${{ vars.DEPLOY_HOST }}"
+          raw="${raw#http://}"
+          raw="${raw#https://}"
+          host="${raw%%:*}"
+          port="${{ vars.PORT }}"
+          if [ -z "$port" ]; then port="22"; fi
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+          echo "port=$port" >> "$GITHUB_OUTPUT"
+
+      - name: Remote diagnostics
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ steps.ssh.outputs.host }}
+          port: ${{ steps.ssh.outputs.port }}
+          username: ${{ vars.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -x
+            echo "=== health :8089 ==="
+            curl -fsS http://127.0.0.1:8089/api/v1/health || true
+            echo
+            echo "=== docker ps ==="
+            docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+            echo "=== cloudflared host ==="
+            command -v cloudflared && cloudflared --version || echo "no cloudflared binary"
+            systemctl is-active cloudflared 2>/dev/null || true
+            ls -la /etc/cloudflared/ 2>/dev/null || true
+            ls -la ~/.cloudflared/ 2>/dev/null || true
+            echo "=== listening 8089 ==="
+            ss -tlnp | grep 8089 || true

@@ -44,6 +44,17 @@ services:
       - ./config/studies.yaml:/config/studies.yaml:ro
       - django-data:/app/data
 
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: zotero20-cloudflared
+    profiles: ["cloudflared"]
+    restart: unless-stopped
+    command: tunnel run --token ${CLOUDFLARED_TUNNEL_TOKEN}
+    network_mode: host
+    depends_on:
+      zotero:
+        condition: service_healthy
+
 volumes:
   zotero-profile:
     name: zotero20-zotero-profile

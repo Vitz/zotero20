@@ -35,7 +35,11 @@ echo "== pull =="
 compose pull
 
 echo "== up (bez build) =="
-compose up -d --no-build --remove-orphans
+PROFILE_ARGS=()
+if [ -n "${CLOUDFLARED_TUNNEL_TOKEN:-}" ]; then
+  PROFILE_ARGS+=(--profile cloudflared)
+fi
+compose "${PROFILE_ARGS[@]}" up -d --no-build --remove-orphans
 
 echo "== migrate =="
 compose exec -T django python manage.py migrate --noinput --fake-initial

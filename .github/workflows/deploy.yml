@@ -74,6 +74,7 @@ jobs:
             export ZOTERO20_IMAGE_DJANGO="${IMAGE_DJANGO}"
             export GHCR_PULL_TOKEN="${{ secrets.GHCR_PULL_TOKEN }}"
             export GHCR_PULL_USER="${{ vars.GHCR_OWNER || 'vitz' }}"
+            export CLOUDFLARED_TUNNEL_TOKEN="${{ secrets.CLOUDFLARED_TUNNEL_TOKEN }}"
             cd stack
             if [ ! -f .env ]; then
               cp .env.example .env

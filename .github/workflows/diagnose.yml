@@ -40,6 +40,8 @@ jobs:
             ls -la ~/.cloudflared/ 2>/dev/null || true
             echo "=== docx2pdf caddy ==="
             docker inspect docx2pdf-caddy-1 --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' 2>/dev/null || true
-            ls -la /opt/docx2pdf/Caddyfile.mikrus 2>/dev/null || true
-            sudo -n true 2>/dev/null && echo "sudo: ok" || echo "sudo: no"
-            groups
+            docker exec docx2pdf-caddy-1 cat /etc/caddy/Caddyfile | tail -25
+            echo "=== caddy -> zotero via bridge ==="
+            docker exec docx2pdf-caddy-1 wget -qO- http://172.17.0.1:8089/api/v1/health 2>&1 || true
+            echo "=== caddy -> zotero via host ==="
+            curl -kfsS -H "Host: zotero.keyweb.pl" https://127.0.0.1/api/v1/health 2>&1 || true

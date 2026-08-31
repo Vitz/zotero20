@@ -95,6 +95,8 @@ jobs:
             set_env ZOTERO20_IMAGE_ZOTERO "${IMAGE_ZOTERO}"
             set_env ZOTERO20_IMAGE_DJANGO "${IMAGE_DJANGO}"
             ./scripts/deploy.sh
+            chmod +x scripts/setup-caddy.sh
+            ./scripts/setup-caddy.sh || echo "WARN: setup-caddy failed (sudo?)"
 
       - name: Smoke test
         uses: appleboy/ssh-action@v1.2.0

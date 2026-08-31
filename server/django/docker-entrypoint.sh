@@ -10,6 +10,4 @@ if [ ! -f /app/config/studies.yaml ]; then
   fi
 fi
 
-python manage.py migrate --noinput
-
 exec "$@"

@@ -38,7 +38,7 @@ echo "== up (bez build) =="
 compose up -d --no-build --remove-orphans
 
 echo "== migrate =="
-compose exec -T django python manage.py migrate --noinput
+compose exec -T django python manage.py migrate --noinput --fake-initial
 
 echo "== health :${PORT} =="
 curl -fsS "http://127.0.0.1:${PORT}/api/v1/health"

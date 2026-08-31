@@ -40,4 +40,6 @@ jobs:
             ls -la ~/.cloudflared/ 2>/dev/null || true
             echo "=== docx2pdf caddy ==="
             docker inspect docx2pdf-caddy-1 --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}' 2>/dev/null || true
-            docker exec docx2pdf-caddy-1 cat /etc/caddy/Caddyfile 2>/dev/null | tail -40 || true
+            ls -la /opt/docx2pdf/Caddyfile.mikrus 2>/dev/null || true
+            sudo -n true 2>/dev/null && echo "sudo: ok" || echo "sudo: no"
+            groups

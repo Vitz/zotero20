@@ -51,6 +51,3 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-    outputs:
-      image_tag: ${{ github.sha }}

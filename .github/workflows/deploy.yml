@@ -9,6 +9,10 @@ concurrency:
   group: deploy-production
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml
@@ -37,7 +41,7 @@ jobs:
           raw="${raw#https://}"
           host="${raw%%:*}"
           # 8089 w DEPLOY_HOST to port HTTP (tunel CF), NIE SSH
-          port="${{ vars.PORT || vars.DEPLOY_SSH_PORT }}"
+          port="${{ vars.PORT }}"
           if [ -z "$port" ]; then port="22"; fi
           echo "host=$host" >> "$GITHUB_OUTPUT"
           echo "port=$port" >> "$GITHUB_OUTPUT"

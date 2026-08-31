@@ -10,8 +10,8 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  # Możesz użyć osobnego repo GH tylko na obrazy — ustaw GHCR_OWNER w Variables
-  IMAGE_OWNER: ${{ vars.GHCR_OWNER || github.repository_owner }}
+  # GHCR wymaga lowercase — vars.GHCR_OWNER lub owner repo w małych literach
+  IMAGE_OWNER: ${{ vars.GHCR_OWNER || 'vitz' }}
   IMAGE_PREFIX: ${{ vars.GHCR_IMAGE_PREFIX || 'zotero20' }}
 
 jobs:

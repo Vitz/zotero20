@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      IMAGE_OWNER: ${{ vars.GHCR_OWNER || github.repository_owner }}
+      IMAGE_OWNER: ${{ vars.GHCR_OWNER || 'vitz' }}
       IMAGE_PREFIX: ${{ vars.GHCR_IMAGE_PREFIX || 'zotero20' }}
       IMAGE_TAG: ${{ github.sha }}
     steps:
@@ -73,7 +73,7 @@ jobs:
             export ZOTERO20_IMAGE_ZOTERO="${IMAGE_ZOTERO}"
             export ZOTERO20_IMAGE_DJANGO="${IMAGE_DJANGO}"
             export GHCR_PULL_TOKEN="${{ secrets.GHCR_PULL_TOKEN }}"
-            export GHCR_PULL_USER="${{ vars.GHCR_OWNER || github.repository_owner }}"
+            export GHCR_PULL_USER="${{ vars.GHCR_OWNER || 'vitz' }}"
             cd stack
             if [ ! -f .env ]; then
               cp .env.example .env

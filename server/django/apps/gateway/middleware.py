@@ -4,6 +4,30 @@ from django.conf import settings
 from django.http import JsonResponse
 
 
+class ApiCsrfExemptMiddleware:
+    """
+    Wyłącza CSRF dla endpointów chronionych X-API-Key (nie sesją Django).
+
+    Zewnętrzni klienci (Google Apps Script, Connector) nie mają tokena CSRF.
+    """
+
+    API_PREFIX = "/api/v1/"
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        if self._exempt_from_csrf(request):
+            setattr(request, "_dont_enforce_csrf_checks", True)
+        return self.get_response(request)
+
+    def _exempt_from_csrf(self, request) -> bool:
+        path = request.path
+        if path.startswith(self.API_PREFIX):
+            return True
+        return any(path.startswith(f"/{prefix}") for prefix in settings.ZOTERO_PROXY_PREFIXES)
+
+
 class ApiKeyMiddleware:
     """
     Wymaga X-API-Key (lub Authorization: Bearer) dla:

@@ -26,8 +26,9 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Zotero local
-Zotero/
+# Zotero local profile (not server/docker/zotero build context)
+/Zotero/
+!server/docker/zotero/
 
 # Apps Script
 .clasp.json

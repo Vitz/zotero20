@@ -208,7 +208,12 @@ function replaceFirstLiteral_(element, searchText, replacementText) {
   if (!found) {
     return false;
   }
-  found.setText(replacementText);
+  // findText() zwraca RangeElement, nie Text — trzeba edytować element tekstowy.
+  var textElement = found.getElement().asText();
+  var start = found.getStartOffset();
+  var end = found.getEndOffsetInclusive();
+  textElement.deleteText(start, end);
+  textElement.insertText(start, replacementText);
   return true;
 }
 

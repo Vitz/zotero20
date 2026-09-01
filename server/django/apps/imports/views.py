@@ -3,7 +3,8 @@ from django.http import JsonResponse
 from apps.imports.middleware import json_api, normalize_doi, normalize_orcid, parse_json_body
 from .services.orcid import import_orcid_works
 from .services.studies import StudiesConfigError, list_studies, resolve_collection_key
-from .services.zotero import ZoteroClient, ZoteroClientError, get_zotero_client
+from .services.exceptions import ZoteroClientError
+from .services.zotero import ZoteroClient, get_zotero_client
 from .services.zotero_web import web_api_configured
 
 

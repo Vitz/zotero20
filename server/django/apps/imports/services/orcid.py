@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 import requests
 from django.conf import settings
 
-from .zotero import ZoteroClient, ZoteroClientError, get_zotero_client
+from .exceptions import ZoteroClientError
+from .zotero import ZoteroClient, get_zotero_client
 
 logger = logging.getLogger(__name__)
 

@@ -6,15 +6,12 @@ import time
 import requests
 from django.conf import settings
 
-from .zotero_web import format_citation_text
+from .citation import format_citation_text
+from .exceptions import ZoteroClientError
 
 logger = logging.getLogger(__name__)
 
-
-class ZoteroClientError(Exception):
-    def __init__(self, message: str, status_code: int | None = None):
-        super().__init__(message)
-        self.status_code = status_code
+__all__ = ["ZoteroClient", "ZoteroClientError", "get_zotero_client", "format_citation_text"]
 
 
 class ZoteroClient:

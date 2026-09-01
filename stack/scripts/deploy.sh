@@ -35,8 +35,14 @@ echo "== disk =="
 df -h / | tail -1
 docker system df 2>/dev/null || true
 
-echo "== prune dangling images =="
-docker image prune -f || true
+echo "== down (zwalnia stare obrazy przed pull) =="
+compose down --remove-orphans || true
+
+echo "== prune build cache =="
+docker builder prune -af || true
+
+echo "== prune unused images =="
+docker image prune -af || true
 
 echo "== pull =="
 compose pull
@@ -54,6 +60,9 @@ compose exec -T django python manage.py migrate --noinput --fake-initial
 echo "== health :${PORT} =="
 curl -fsS "http://127.0.0.1:${PORT}/api/v1/health"
 echo
+
+echo "== prune unused images =="
+docker image prune -af || true
 
 compose ps
 echo "OK"

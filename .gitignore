@@ -8,6 +8,7 @@ venv/
 
 # Node (connector build)
 node_modules/
+connector/upstream/
 dist/
 *.crx
 

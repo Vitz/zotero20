@@ -1,6 +1,6 @@
 # 003 — postMessage z panelu Zotero20 Import
 
-**Status:** planowany (nie zastosowany w `setup.sh`)
+**Status:** zastosowany w `setup.sh` (`003-sidebar-postmessage.patch`)
 
 ## Cel
 

@@ -1,0 +1,16 @@
+diff --git a/src/common/connector.js b/src/common/connector.js
+index 84f1ddb..0f8b5fc 100644
+--- a/src/common/connector.js
++++ b/src/common/connector.js
+@@ -193,6 +193,11 @@ Zotero.Connector = new function() {
+ 				"X-Zotero-Version":Zotero.version,
+ 				"X-Zotero-Connector-API-Version":CONNECTOR_API_VERSION
+ 			}, options.headers || {});
++		// zotero20-api-key: gateway auth for remote Zotero Desktop
++		var apiKey = Zotero.Prefs.get('zotero20.apiKey');
++		if (apiKey) {
++			headers['X-API-Key'] = apiKey;
++		}
+ 		var timeout = "timeout" in options ? options.timeout : 15000;
+ 		var queryString = options.queryString ? ("?" + options.queryString) : "";
+ 		

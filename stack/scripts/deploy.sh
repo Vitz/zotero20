@@ -31,6 +31,13 @@ if [ -n "${GHCR_PULL_TOKEN:-}" ]; then
   echo "${GHCR_PULL_TOKEN}" | docker login ghcr.io -u "${GHCR_PULL_USER:-github}" --password-stdin
 fi
 
+echo "== disk =="
+df -h / | tail -1
+docker system df 2>/dev/null || true
+
+echo "== prune dangling images =="
+docker image prune -f || true
+
 echo "== pull =="
 compose pull
 

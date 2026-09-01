@@ -24,6 +24,21 @@ fi
 cat /tmp/zotero20-ping.json
 echo
 
+echo "== document/execCommand reachability (expect 4xx, not 502) =="
+DOC_RESP=$(curl -sS -w "\nHTTP_CODE:%{http_code} TIME:%{time_total}" --max-time 45 \
+  -X POST "${HDR[@]}" -H "Content-Type: application/json" -d '{}' \
+  "$BASE/connector/document/execCommand" 2>&1 || true)
+echo "$DOC_RESP"
+if echo "$DOC_RESP" | grep -q 'HTTP_CODE:502'; then
+  echo "BŁĄD: document/execCommand zwrócił 502 — Zotero Desktop niedostępny lub timeout proxy"
+  exit 1
+fi
+if echo "$DOC_RESP" | grep -q 'HTTP_CODE:000'; then
+  echo "BŁĄD: document/execCommand timeout — zwiększ ZOTERO_PROXY_DOCUMENT_TIMEOUT"
+  exit 1
+fi
+echo "document/execCommand proxy OK (Zotero odpowiedział)"
+
 echo "== health =="
 curl -sS "$BASE/api/v1/health"
 echo

@@ -38,10 +38,18 @@ jobs:
             echo "=== docker compose ps ==="
             docker compose -p zotero20 ps 2>/dev/null || docker ps --filter name=zotero20
             echo "=== zotero desktop ping (container) ==="
-            docker exec zotero20-zotero curl -fsS -D - http://127.0.0.1:23119/connector/ping 2>&1 | head -20 || echo "FAIL: zotero container ping"
+            docker exec zotero20-zotero curl -fsS -D - --max-time 15 \
+              http://127.0.0.1:23119/connector/ping 2>&1 | head -20 || echo "FAIL: zotero container ping"
             echo "=== connector ping via django (Firefox Connector) ==="
-            curl -sS -D - -H "X-API-Key: ${{ secrets.ZOTERO20_API_KEY }}" \
+            curl -sS -D - --max-time 30 -H "X-API-Key: ${{ secrets.ZOTERO20_API_KEY }}" \
               http://127.0.0.1:8089/connector/ping 2>&1 | head -25 || echo "FAIL: django connector proxy"
+            echo "=== document/execCommand reachability (expect 400/405, not 502/timeout) ==="
+            curl -sS -w "\nHTTP %{http_code} time=%{time_total}s\n" --max-time 45 \
+              -X POST -H "X-API-Key: ${{ secrets.ZOTERO20_API_KEY }}" \
+              -H "Content-Type: application/json" \
+              -d '{}' \
+              http://127.0.0.1:8089/connector/document/execCommand 2>&1 | tail -5 \
+              || echo "FAIL: document/execCommand proxy timeout"
             echo "=== django logs (tail 50) ==="
             docker compose -p zotero20 logs django --tail 50 2>/dev/null || docker logs zotero20-django --tail 50 2>/dev/null || true
             echo "=== collections (API key) ==="

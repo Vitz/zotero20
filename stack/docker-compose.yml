@@ -41,7 +41,10 @@ services:
     environment:
       ZOTERO_URL: http://127.0.0.1:23119
       STUDIES_CONFIG: /config/studies.yaml
-      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-1}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-180}
+      ZOTERO_PROXY_TIMEOUT: ${ZOTERO_PROXY_TIMEOUT:-60}
+      ZOTERO_PROXY_DOCUMENT_TIMEOUT: ${ZOTERO_PROXY_DOCUMENT_TIMEOUT:-180}
     volumes:
       - ./config/studies.yaml:/config/studies.yaml:ro
       - django-data:/app/data

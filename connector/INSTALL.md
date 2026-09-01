@@ -174,9 +174,21 @@ W Firefox: usuń stary dodatek w `about:debugging` i załaduj ponownie z `build/
 |-------|-------------|
 | Brak menu Zotero w Docs | Sprawdź, czy wtyczka włączona; odśwież dokument |
 | „Zotero is offline” | `connector.url`, `zotero20.apiKey`, dostęp do `zotero.keyweb.pl` |
+| „Zotero uaktualnia dokument…” w nieskończoność | Zobacz sekcję poniżej; zwykle timeout proxy lub brak sync w kontenerze |
 | Przycisk sidebara nie otwiera dialogu | Odśwież Docs; użyj **Zotero → Dodaj/edytuj cytowanie** |
 | Build fail na Windows | `.\build-connector.ps1` lub `.\build-firefox.ps1` w `connector/`, WSL (`build-wsl.sh`) lub artefakt z GitHub Actions |
 | `gulp not found` | `cd upstream && npm install` |
+
+### „Zotero uaktualnia twój dokument. Proszę czekać…” (Firefox / Google Docs)
+
+Cytowania (`Wstaw cytat`, Refresh) idą przez **lokalny Zotero Desktop** na serwerze (`/connector/document/*`), nie przez Web API zotero.org.
+
+1. **Config Editor** (`about:config` w Firefox, filtr `zotero`):
+   - `extensions.zotero.connector.url` → `https://zotero.keyweb.pl/` (ze slashem na końcu)
+   - `extensions.zotero.zotero20.apiKey` → ten sam klucz co `ZOTERO20_API_KEY` na serwerze (bez spacji)
+2. **Test połączenia:** w terminalu (lub DevTools → Sieć) sprawdź, czy `GET https://zotero.keyweb.pl/connector/ping` zwraca `200` i nagłówek `X-Zotero-Version`. Bez klucza API: `401`.
+3. **Sync biblioteki:** pozycje dodane przez sidebar (Web API) muszą być **zsynchronizowane** z Zotero w kontenerze — inaczej dialog cytowania będzie pusty. Administrator musi zalogować konto zotero.org w kontenerze (VNC/noVNC) i poczekać na sync.
+4. **Po deployze serwera:** odśwież Google Docs (Ctrl+F5) i spróbuj ponownie — stary request mógł paść na timeout 30 s.
 
 ## Co fork zmienia w upstream
 

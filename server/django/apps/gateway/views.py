@@ -28,6 +28,15 @@ STRIP_REQUEST_HEADERS = {
     "cf-access-client-secret",
 }
 
+# Citing protocol — wolne na małym VPS (citeproc + sync w kontenerze Zotero).
+DOCUMENT_PROXY_PREFIX = "connector/document/"
+
+
+def _proxy_timeout(zotero_path: str) -> int:
+    if zotero_path.startswith(DOCUMENT_PROXY_PREFIX):
+        return settings.ZOTERO_PROXY_DOCUMENT_TIMEOUT
+    return settings.ZOTERO_PROXY_TIMEOUT
+
 
 def zotero_proxy(request, zotero_path: str):
     """Reverse proxy do lokalnego Zotero — wymaga X-API-Key (middleware)."""
@@ -43,6 +52,8 @@ def zotero_proxy(request, zotero_path: str):
             continue
         headers[key] = value
 
+    timeout = _proxy_timeout(zotero_path)
+
     try:
         upstream = requests.request(
             method=request.method,
@@ -50,7 +61,7 @@ def zotero_proxy(request, zotero_path: str):
             headers=headers,
             data=request.body if request.method not in ("GET", "HEAD") else None,
             allow_redirects=False,
-            timeout=30,
+            timeout=timeout,
         )
     except requests.RequestException as exc:
         logger.exception("Zotero proxy error for %s", url)

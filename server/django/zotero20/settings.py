@@ -145,6 +145,12 @@ ZOTERO_PROXY_PREFIXES = (
     "api/local/",
 )
 
+# Proxy do Zotero Desktop — citing protocol (execCommand) na Mikrusie bywa wolny.
+ZOTERO_PROXY_TIMEOUT = int(os.environ.get("ZOTERO_PROXY_TIMEOUT", "60"))
+ZOTERO_PROXY_DOCUMENT_TIMEOUT = int(
+    os.environ.get("ZOTERO_PROXY_DOCUMENT_TIMEOUT", "180")
+)
+
 # --- Captcha (logowanie admin /app) ---
 # none | simple | recaptcha | hcaptcha
 CAPTCHA_TYPE = os.environ.get("CAPTCHA_TYPE", "simple").lower()

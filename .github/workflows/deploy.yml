@@ -101,7 +101,9 @@ jobs:
               set_env ZOTERO_WEB_USER_ID "${{ secrets.ZOTERO_WEB_USER_ID }}"
             fi
             set_env ZOTERO20_HOST_PORT "8089"
-            set_env GUNICORN_WORKERS "2"
+            set_env GUNICORN_WORKERS "1"
+            set_env GUNICORN_TIMEOUT "180"
+            set_env ZOTERO_PROXY_DOCUMENT_TIMEOUT "180"
             set_env DJANGO_ALLOWED_HOSTS "zotero.keyweb.pl,localhost,127.0.0.1"
             set_env ZOTERO20_IMAGE_ZOTERO "${IMAGE_ZOTERO}"
             set_env ZOTERO20_IMAGE_DJANGO "${IMAGE_DJANGO}"

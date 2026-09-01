@@ -43,6 +43,13 @@ jobs:
             curl -fsS -H "X-API-Key: ${{ secrets.ZOTERO20_API_KEY }}" \
               http://127.0.0.1:8089/api/v1/collections || true
             echo
+            echo "=== collections source check ==="
+            curl -fsS -H "X-API-Key: ${{ secrets.ZOTERO20_API_KEY }}" \
+              http://127.0.0.1:8089/api/v1/collections \
+              | grep -q '"source": "web"' \
+              && echo "OK: source=web (zotero.org)" \
+              || echo "WARN: source!=web — sprawdź ZOTERO_WEB_API_KEY w stack/.env"
+            echo
             echo "=== import DOI test (Hybrid 6GFRGT7A) ==="
             curl -sS -w "\nHTTP %{http_code}\n" \
               -H "X-API-Key: ${{ secrets.ZOTERO20_API_KEY }}" \

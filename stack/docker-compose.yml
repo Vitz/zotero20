@@ -41,6 +41,7 @@ services:
     environment:
       ZOTERO_URL: http://127.0.0.1:23119
       STUDIES_CONFIG: /config/studies.yaml
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
     volumes:
       - ./config/studies.yaml:/config/studies.yaml:ro
       - django-data:/app/data

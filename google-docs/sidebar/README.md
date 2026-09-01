@@ -71,7 +71,8 @@ Google Docs
 | Objaw | Przyczyna | Rozwiązanie |
 |-------|-----------|-------------|
 | „Ustaw domyślną kolekcję” | Brak zapisanej kolekcji w Script Properties | Zakładka **Ustawienia** → wybierz kolekcję → Zapisz |
-| Pusta lista kolekcji | Biblioteka Zotero na serwerze (Docker) jest pusta lub niesynchronizowana z zotero.org | Zsynchronizuj Zotero na serwerze z kontem online **albo** wpisz klucz ręcznie w Ustawieniach (np. `FVIAD3D8` z URL zotero.org — działa po sync) |
+| Pusta lista kolekcji | Serwer bez `ZOTERO_WEB_API_KEY` (fallback Local API) albo biblioteka Docker pusta | Sprawdź `GET /api/v1/collections` — pole `"source"` powinno być `"web"`. Po deploy odśwież panel. Wpisz klucz ręcznie w Ustawieniach (np. `FVIAD3D8`) |
+| Tekst „Local API” w panelu | Stara wersja sidebara (przed `clasp push`) | `clasp push` z `google-docs/sidebar/`, zamknij i otwórz panel ponownie |
 | „Nieprawidłowy klucz API” | Zły `ZOTERO20_API_KEY` | Ustaw ten sam klucz co w `.env` na serwerze |
 | Zaawansowane: brak badań | Brak `studies.yaml` | Normalne dla jednego użytkownika — użyj domyślnej kolekcji |
 

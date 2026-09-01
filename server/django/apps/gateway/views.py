@@ -50,7 +50,7 @@ def zotero_proxy(request, zotero_path: str):
             headers=headers,
             data=request.body if request.method not in ("GET", "HEAD") else None,
             allow_redirects=False,
-            timeout=120,
+            timeout=30,
         )
     except requests.RequestException as exc:
         logger.exception("Zotero proxy error for %s", url)

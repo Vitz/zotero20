@@ -44,6 +44,15 @@ COLLECTIONS_JSON=$(curl -sS "${HDR[@]}" "$BASE/api/v1/collections" 2>/dev/null |
 if [ -n "$COLLECTIONS_JSON" ]; then
   echo "== collections =="
   echo "$COLLECTIONS_JSON"
+  if echo "$COLLECTIONS_JSON" | grep -q '"source": "web"'; then
+    echo "collections source: web (zotero.org) OK"
+  elif echo "$COLLECTIONS_JSON" | grep -q '"source": "local"'; then
+    echo "UWAGA: collections source=local — brak ZOTERO_WEB_API_KEY lub Web API niedostępne"
+    if [ "${REQUIRE_WEB_API:-0}" = "1" ]; then
+      echo "BŁĄD: wymagany source=web (ustaw REQUIRE_WEB_API=0 aby pominąć)"
+      exit 1
+    fi
+  fi
 fi
 
 if [ "${SMOKE_TEST_DOI_IMPORT:-0}" = "1" ]; then

@@ -73,21 +73,19 @@
       <option value="">Ładowanie kolekcji…</option>
     </select>
     <button id="btn-save-default" type="button" onclick="saveDefaultCollection()" disabled>Zapisz domyślną kolekcję</button>
-    <p class="hint" style="font-size:11px;color:#555;margin-top:8px;">
-      Lista pobierana na żywo z <strong>lokalnej biblioteki Zotero na serwerze</strong> (nie z zotero.org).
-      Jeśli lista jest pusta, zsynchronizuj Zotero na serwerze z kontem online albo wpisz klucz ręcznie poniżej.
+    <p id="collections-source-hint" class="hint" style="font-size:11px;color:#555;margin-top:8px;">
+      Ładowanie źródła kolekcji…
     </p>
 
     <div id="manual-collection-block">
-      <p>
-        <strong>Lista pusta?</strong> Panel korzysta z biblioteki Zotero na serwerze (Docker), a nie z Twojego konta
-        <code>zotero.org</code>. Kolekcje online pojawią się dopiero po synchronizacji albo możesz podać klucz ręcznie.
+      <p id="manual-collection-intro">
+        <strong>Lista pusta?</strong> Wpisz klucz kolekcji ręcznie albo sprawdź konfigurację serwera.
       </p>
       <p>
         Klucz znajdziesz w adresie kolekcji na zotero.org, np.<br>
         <code>https://www.zotero.org/knsz/collections/<strong>FVIAD3D8</strong>/collection</code>
       </p>
-      <p style="font-size:11px;color:#555;">
+      <p id="manual-collection-sync-note" style="font-size:11px;color:#555;display:none;">
         Import zadziała dopiero, gdy ta kolekcja istnieje w bibliotece na serwerze — zwykle po synchronizacji
         Zotero (Docker) z kontem zotero.org. Po sync klucze online i serwerowe są identyczne.
       </p>
@@ -156,10 +154,31 @@
     var lastImport = { doi: '', itemKey: '' };
     var appState = {
       collections: [],
+      collectionsSource: '',
       defaultCollection: { key: '', name: '' },
       studies: [],
       configuredStudies: 0,
     };
+
+    function updateCollectionsSourceHint(source) {
+      appState.collectionsSource = source || '';
+      var el = document.getElementById('collections-source-hint');
+      if (!el) return;
+      if (source === 'web') {
+        el.innerHTML =
+          'Lista pobierana na żywo z <strong>konta zotero.org</strong> (Zotero Web API).';
+      } else if (source === 'local') {
+        el.innerHTML =
+          'Lista pobierana na żywo z <strong>lokalnej biblioteki Zotero na serwerze</strong> (Local API, nie zotero.org). ' +
+          'Jeśli lista jest pusta, zsynchronizuj Zotero na serwerze z kontem online albo wpisz klucz ręcznie poniżej.';
+      } else {
+        el.textContent = 'Lista kolekcji pobierana na żywo z serwera Zotero20.';
+      }
+      var syncNote = document.getElementById('manual-collection-sync-note');
+      if (syncNote) {
+        syncNote.style.display = source === 'local' ? 'block' : 'none';
+      }
+    }
 
     function showTab(name) {
       document.querySelectorAll('.tab').forEach(function (el) { el.classList.remove('active'); });
@@ -331,6 +350,7 @@
     function loadCollections() {
       google.script.run
         .withSuccessHandler(function (data) {
+          updateCollectionsSourceHint(data.source || '');
           appState.collections = data.collections || [];
           fillCollectionSelect('default-collection', appState.defaultCollection.key);
           var hasCollections = appState.collections.length > 0;
@@ -338,13 +358,20 @@
           showManualCollectionBlock(!hasCollections);
           if (!hasCollections) {
             var hint = data.hint || (
-              'Brak kolekcji w bibliotece serwera. To nie jest to samo co zotero.org — ' +
-              'zsynchronizuj Zotero na serwerze z kontem online albo wpisz klucz kolekcji ręcznie (np. FVIAD3D8).'
+              data.source === 'web'
+                ? 'Brak kolekcji na koncie zotero.org powiązanym z kluczem API serwera.'
+                : 'Brak kolekcji w bibliotece serwera (Local API). Zsynchronizuj Zotero na serwerze z kontem online albo wpisz klucz ręcznie (np. FVIAD3D8).'
             );
             setStatus(hint, true);
+          } else if (data.source === 'web') {
+            setStatus(
+              'Załadowano ' + appState.collections.length + ' kolekcji z zotero.org (Web API).',
+              false
+            );
           }
         })
         .withFailureHandler(function (e) {
+          updateCollectionsSourceHint('');
           fillCollectionSelect('default-collection', '');
           showManualCollectionBlock(true);
           setStatus(

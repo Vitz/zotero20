@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-chrome:
+  build:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -26,7 +26,7 @@ jobs:
           node-version: '20'
 
       - name: Setup upstream and apply patches
-        run: chmod +x setup.sh && ./setup.sh
+        run: chmod +x setup.sh package-firefox-xpi.sh && ./setup.sh
 
       - name: Install dependencies
         working-directory: connector/upstream
@@ -36,6 +36,15 @@ jobs:
         working-directory: connector/upstream
         run: ./build.sh
 
+      - name: Verify Chrome and Firefox builds
+        run: |
+          test -f upstream/build/manifestv3/manifest.json
+          test -f upstream/build/firefox/manifest.json
+          ! grep -q 'BACKGROUND SCRIPTS' upstream/build/firefox/manifest.json
+
+      - name: Package Firefox XPI
+        run: ./package-firefox-xpi.sh
+
       - name: Upload Chrome build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -43,8 +52,19 @@ jobs:
           path: connector/upstream/build/manifestv3/
           retention-days: 30
 
+      - name: Upload Firefox build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zotero20-connector-firefox
+          path: |
+            connector/upstream/build/firefox/
+            connector/upstream/build/zotero20-connector-firefox.xpi
+          retention-days: 30
+
       - name: Build summary
         run: |
           echo "### Zotero20 Connector build OK" >> "$GITHUB_STEP_SUMMARY"
-          echo "Load unpacked: \`connector/upstream/build/manifestv3\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "Or download artifact **zotero20-connector-chrome** from this workflow run." >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Chrome** (Load unpacked): \`connector/upstream/build/manifestv3\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Firefox** (temporary add-on): \`connector/upstream/build/firefox\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Firefox XPI**: \`connector/upstream/build/zotero20-connector-firefox.xpi\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Download artifacts **zotero20-connector-chrome** or **zotero20-connector-firefox** from this workflow run." >> "$GITHUB_STEP_SUMMARY"

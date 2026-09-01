@@ -56,7 +56,8 @@ git -C "${UPSTREAM}" submodule update --init --depth 1 \
   src/zotero-google-docs-integration \
   src/translate \
   src/utilities \
-  src/zotero
+  src/zotero \
+  src/zotero-schema
 
 echo "Applying Zotero20 patches..."
 apply_patch "001-remote-url-default.patch"
@@ -82,6 +83,7 @@ echo "Done. Build:"
 echo "  cd ${UPSTREAM} && npm install && ./build.sh"
 echo ""
 echo "Chrome (MV3): Load unpacked → ${UPSTREAM}/build/manifestv3"
+echo "Firefox (MV2): about:debugging → ${UPSTREAM}/build/firefox/manifest.json"
 echo ""
 echo "W Config Editor wtyczki ustaw:"
 echo "  connector.url = ${CONNECTOR_URL}"

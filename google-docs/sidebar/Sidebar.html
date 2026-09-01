@@ -240,6 +240,38 @@
       var el = document.getElementById('status');
       el.textContent = msg;
       el.className = isError ? 'error' : 'ok';
+      try {
+        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      } catch (ignore) {}
+    }
+
+    function formatScriptError(err) {
+      if (!err) return 'Nieznany błąd.';
+      if (typeof err === 'string') return err;
+      if (err.message) return String(err.message);
+      try {
+        return JSON.stringify(err);
+      } catch (ignore) {
+        return String(err);
+      }
+    }
+
+    function setPasteButtonsDisabled(disabled) {
+      var ids = ['btn-paste-duplicate'];
+      ids.forEach(function (id) {
+        var btn = document.getElementById(id);
+        if (btn) btn.disabled = !!disabled;
+      });
+      document.querySelectorAll('.study-row button').forEach(function (btn) {
+        btn.disabled = !!disabled;
+      });
+      var postBtn = document.querySelector('#post-import button');
+      if (postBtn) postBtn.disabled = !!disabled;
+    }
+
+    function showPasteFeedback(msg, isError) {
+      setStatus(msg, isError);
+      google.script.run.showPasteAlert(msg, !!isError);
     }
 
     function hideDuplicateOffer() {
@@ -261,7 +293,10 @@
     }
 
     function pasteDuplicateItem() {
-      if (!duplicateItem || !duplicateItem.itemKey) return;
+      if (!duplicateItem || !duplicateItem.itemKey) {
+        showPasteFeedback('Brak klucza pozycji — zaimportuj DOI ponownie.', true);
+        return;
+      }
       pasteItemCitation(
         duplicateItem.itemKey,
         { type: 'doi', value: duplicateItem.doi },
@@ -291,21 +326,34 @@
 
     function pasteLastImport() {
       if (!lastImport.itemKey) {
-        setStatus('Brak pozycji do wklejenia — najpierw zaimportuj DOI.', true);
+        showPasteFeedback('Brak pozycji do wklejenia — najpierw zaimportuj DOI.', true);
         return;
       }
       pasteItemCitation(lastImport.itemKey, lastImport.identifiers, lastImport.citationText);
     }
 
     function pasteItemCitation(itemKey, identifiers, knownCitationText) {
-      setStatus('Wklejam cytowanie…');
+      itemKey = String(itemKey || '').trim();
+      if (!itemKey) {
+        showPasteFeedback('Brak klucza pozycji — zaimportuj DOI ponownie lub wybierz pozycję z listy.', true);
+        return;
+      }
+      setPasteButtonsDisabled(true);
+      setStatus('Szukam [*] w dokumencie…', false);
       google.script.run
         .withSuccessHandler(function (r) {
-          setStatus('Zamieniono placeholder na: ' + (r.citation_text || knownCitationText || ''));
+          setPasteButtonsDisabled(false);
+          var cite = (r && r.citation_text) || knownCitationText || '';
+          showPasteFeedback('Zamieniono na ' + cite, false);
           hideDuplicateOffer();
         })
         .withFailureHandler(function (e) {
-          setStatus(e.message, true);
+          setPasteButtonsDisabled(false);
+          var msg = formatScriptError(e);
+          if (/brak \[\*\]|placeholder/i.test(msg)) {
+            msg = 'Brak [*] — wpisz placeholder w dokumencie i spróbuj ponownie.';
+          }
+          showPasteFeedback(msg, true);
         })
         .pasteCitationForItem(itemKey, identifiers || {});
     }
@@ -342,8 +390,9 @@
         btn.textContent = 'Wklej zamiast [*]';
         btn.onclick = (function (it) {
           return function () {
-            var ids = it.doi ? { type: 'doi', value: it.doi } : null;
-            pasteItemCitation(it.key, ids, it.citation_text);
+            var key = it.key || it.item_key || '';
+            var ids = it.doi ? { type: 'doi', value: it.doi } : {};
+            pasteItemCitation(key, ids, it.citation_text);
           };
         })(item);
 

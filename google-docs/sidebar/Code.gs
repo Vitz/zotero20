@@ -121,11 +121,25 @@ function getItemCitationText(itemKey) {
 function pasteCitationForItem(itemKey, identifiers) {
   var key = String(itemKey || '').trim();
   if (!key) {
-    throw new Error('Brak klucza pozycji.');
+    throw new Error('Brak klucza pozycji — zaimportuj DOI ponownie lub wybierz pozycję z listy.');
   }
-  var citationText = getItemCitationText(key);
+  var citationText = '';
+  try {
+    citationText = getItemCitationText(key);
+  } catch (e) {
+    throw new Error('Nie udało się pobrać cytowania: ' + (e.message || String(e)));
+  }
+  if (!citationText) {
+    throw new Error('Brak tekstu cytowania dla pozycji ' + key + '.');
+  }
   replacePlaceholderInDocument_(citationText, identifiers || {});
   return { replaced: true, citation_text: citationText, item_key: key };
+}
+
+/** Widoczny komunikat w dokumencie (modal) — wywoływany z sidebara po wklejeniu. */
+function showPasteAlert(message, isError) {
+  var title = isError ? 'Zotero20 — błąd' : 'Zotero20';
+  DocumentApp.getUi().alert(title, String(message || ''), DocumentApp.getUi().ButtonSet.OK);
 }
 
 /**
@@ -144,7 +158,7 @@ function replacePlaceholderInDocument_(text, identifiers) {
   }
 
   throw new Error(
-    'W dokumencie brak [*] ani [identyfikator] — wpisz placeholder i spróbuj ponownie'
+    'Brak [*] — wpisz placeholder w dokumencie (np. [*] lub [DOI]) i spróbuj ponownie.'
   );
 }
 

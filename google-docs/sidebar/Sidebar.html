@@ -17,6 +17,46 @@
     #post-import p { margin: 0 0 8px; font-size: 12px; line-height: 1.4; }
     #post-import button { margin-top: 6px; }
     #post-import .hint { font-size: 11px; color: #555; margin-top: 8px; }
+    #study-overview {
+      margin-top: 14px;
+      padding: 8px;
+      background: #f9f9f9;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    #study-overview h3 { margin: 0 0 8px; font-size: 13px; }
+    .study-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #eee;
+    }
+    .study-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+    .study-title {
+      flex: 1;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+    .study-row button {
+      width: auto;
+      margin: 0;
+      padding: 4px 6px;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    #duplicate-offer {
+      display: none;
+      margin-top: 10px;
+      padding: 8px;
+      background: #fff8e1;
+      border: 1px solid #ffe082;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    #duplicate-offer button { margin-top: 6px; width: 100%; }
     #setup-warning, #studies-warning {
       display: none;
       margin-top: 10px;
@@ -138,20 +178,30 @@
   <div id="studies-warning"></div>
   <div id="status"></div>
 
+  <div id="duplicate-offer">
+    <strong>Pozycja już w kolekcji</strong>
+    <p id="duplicate-offer-text"></p>
+    <button type="button" id="btn-paste-duplicate" onclick="pasteDuplicateItem()">Wklej zamiast [*]</button>
+  </div>
+
   <div id="post-import">
     <h3>Źródło w bibliotece</h3>
     <p id="post-import-summary"></p>
-    <button type="button" onclick="requestCitationInsert()">Wstaw cytowanie w kursorze</button>
+    <button type="button" onclick="pasteLastImport()">Wklej zamiast [*]</button>
     <p class="hint">
-      Otwiera dialog cytowań Zotero (przez Connector). Jeśli nic się nie dzieje,
-      użyj menu <strong>Zotero → Dodaj/edytuj cytowanie</strong>.
-      Bibliografia i styl: <strong>Zotero → Dodaj/edytuj bibliografię</strong> oraz
-      <strong>Zotero → Preferencje dokumentu</strong>.
+      Zamienia pierwszy <strong>[*]</strong> lub <strong>[identyfikator]</strong> w dokumencie na cytowanie.
+      Pełne cytowania Zotero: menu <strong>Zotero → Dodaj/edytuj cytowanie</strong>.
     </p>
   </div>
 
+  <div id="study-overview" style="display:none;">
+    <h3>Pozycje w kolekcji</h3>
+    <div id="study-overview-list"></div>
+  </div>
+
   <script>
-    var lastImport = { doi: '', itemKey: '' };
+    var lastImport = { doi: '', orcid: '', itemKey: '', citationText: '', identifiers: null };
+    var duplicateItem = null;
     var appState = {
       collections: [],
       collectionsSource: '',
@@ -192,40 +242,154 @@
       el.className = isError ? 'error' : 'ok';
     }
 
-    function hidePostImport() {
-      document.getElementById('post-import').style.display = 'none';
+    function hideDuplicateOffer() {
+      duplicateItem = null;
+      document.getElementById('duplicate-offer').style.display = 'none';
     }
 
-    function showPostImport(doi, itemKey, collectionLabel) {
-      lastImport = { doi: doi || '', itemKey: itemKey || '' };
-      var summary = 'DOI: ' + doi;
+    function showDuplicateOffer(r) {
+      duplicateItem = {
+        itemKey: r.item_key || '',
+        doi: r.doi || '',
+        title: r.title || '',
+        citationText: r.citation_text || '',
+      };
+      var text = r.title ? r.title : ('DOI: ' + r.doi);
+      document.getElementById('duplicate-offer-text').textContent =
+        text + '\nMożesz wkleić cytowanie istniejącej pozycji zamiast ponownego importu.';
+      document.getElementById('duplicate-offer').style.display = 'block';
+    }
+
+    function pasteDuplicateItem() {
+      if (!duplicateItem || !duplicateItem.itemKey) return;
+      pasteItemCitation(
+        duplicateItem.itemKey,
+        { type: 'doi', value: duplicateItem.doi },
+        duplicateItem.citationText
+      );
+    }
+
+    function showPostImport(doi, itemKey, collectionLabel, extra) {
+      extra = extra || {};
+      lastImport = {
+        doi: doi || '',
+        orcid: extra.orcid || '',
+        itemKey: itemKey || '',
+        citationText: extra.citationText || '',
+        identifiers: extra.identifiers || (doi ? { type: 'doi', value: doi } : null),
+      };
+      var summary = '';
+      if (doi) summary += 'DOI: ' + doi;
+      if (extra.orcid) summary += (summary ? '\n' : '') + 'ORCID: ' + extra.orcid;
       if (collectionLabel) summary += '\nKolekcja: ' + collectionLabel;
       if (itemKey) summary += '\nKlucz pozycji: ' + itemKey;
+      if (extra.placeholderReplaced) summary += '\n✓ Zamieniono placeholder w dokumencie';
+      if (extra.placeholderError) summary += '\n⚠ ' + extra.placeholderError;
       document.getElementById('post-import-summary').textContent = summary;
       document.getElementById('post-import').style.display = 'block';
     }
 
-    function requestCitationInsert() {
-      var payload = {
-        source: 'zotero20-sidebar',
-        action: 'addEditCitation',
-        itemKey: lastImport.itemKey || null,
-        doi: lastImport.doi || null,
-        ts: Date.now()
-      };
-      try {
-        window.parent.postMessage(payload, '*');
-        setStatus(
-          'Żądanie wysłane do Connectora. Jeśli dialog cytowań się nie otworzy, ' +
-          'użyj menu Zotero → Dodaj/edytuj cytowanie.',
-          false
-        );
-      } catch (e) {
-        setStatus(
-          'Użyj menu Zotero → Dodaj/edytuj cytowanie (wymaga Zotero20 Connector).',
-          false
-        );
+    function pasteLastImport() {
+      if (!lastImport.itemKey) {
+        setStatus('Brak pozycji do wklejenia — najpierw zaimportuj DOI.', true);
+        return;
       }
+      pasteItemCitation(lastImport.itemKey, lastImport.identifiers, lastImport.citationText);
+    }
+
+    function pasteItemCitation(itemKey, identifiers, knownCitationText) {
+      setStatus('Wklejam cytowanie…');
+      google.script.run
+        .withSuccessHandler(function (r) {
+          setStatus('Zamieniono placeholder na: ' + (r.citation_text || knownCitationText || ''));
+          hideDuplicateOffer();
+        })
+        .withFailureHandler(function (e) {
+          setStatus(e.message, true);
+        })
+        .pasteCitationForItem(itemKey, identifiers || {});
+    }
+
+    function truncateTitle(title, max) {
+      max = max || 70;
+      title = String(title || '').trim();
+      if (title.length <= max) return title || '(bez tytułu)';
+      return title.substring(0, max) + '…';
+    }
+
+    function renderStudyOverview(items) {
+      var box = document.getElementById('study-overview');
+      var list = document.getElementById('study-overview-list');
+      if (!items || !items.length) {
+        box.style.display = 'none';
+        list.innerHTML = '';
+        return;
+      }
+      list.innerHTML = '';
+      items.forEach(function (item) {
+        var row = document.createElement('div');
+        row.className = 'study-row';
+
+        var title = document.createElement('div');
+        title.className = 'study-title';
+        title.textContent = truncateTitle(item.title);
+        if (item.citation_text) {
+          title.title = item.citation_text;
+        }
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = 'Wklej zamiast [*]';
+        btn.onclick = (function (it) {
+          return function () {
+            var ids = it.doi ? { type: 'doi', value: it.doi } : null;
+            pasteItemCitation(it.key, ids, it.citation_text);
+          };
+        })(item);
+
+        row.appendChild(title);
+        row.appendChild(btn);
+        list.appendChild(row);
+      });
+      box.style.display = 'block';
+    }
+
+    function loadStudyOverview() {
+      if (!appState.defaultCollection.key) {
+        renderStudyOverview([]);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(function (data) {
+          var items = (data && data.items) || [];
+          if (!items.length) {
+            google.script.run
+              .withSuccessHandler(function (sessionItems) {
+                renderStudyOverview(sessionItems || []);
+              })
+              .withFailureHandler(function () {
+                renderStudyOverview([]);
+              })
+              .getSessionItems();
+            return;
+          }
+          renderStudyOverview(items);
+        })
+        .withFailureHandler(function () {
+          google.script.run
+            .withSuccessHandler(function (sessionItems) {
+              renderStudyOverview(sessionItems || []);
+            })
+            .withFailureHandler(function () {
+              renderStudyOverview([]);
+            })
+            .getSessionItems();
+        })
+        .getCollectionItems(appState.defaultCollection.key, 15);
+    }
+
+    function hidePostImport() {
+      document.getElementById('post-import').style.display = 'none';
     }
 
     function showSetupWarning(html) {
@@ -277,6 +441,7 @@
         showTab('settings');
       } else {
         showSetupWarning('');
+        loadStudyOverview();
       }
     }
 
@@ -436,6 +601,7 @@
           appState.defaultCollection = saved;
           fillCollectionSelect('default-collection', appState.defaultCollection.key);
           updateCurrentCollectionLabels();
+          loadStudyOverview();
           setStatus('Zapisano domyślną kolekcję: ' + saved.name);
         })
         .withFailureHandler(function (e) {
@@ -463,22 +629,50 @@
       var target = resolveImportTarget('study-doi');
       if (!target) return;
       hidePostImport();
+      hideDuplicateOffer();
       setStatus('Importuję…');
       google.script.run
         .withSuccessHandler(function (r) {
           var label = appState.defaultCollection.name || r.collection_key || '';
-          setStatus('Dodano DOI: ' + r.doi + ' → ' + label);
-          google.script.run
-            .withSuccessHandler(function (itemKey) {
-              showPostImport(r.doi, itemKey, label);
-            })
-            .withFailureHandler(function () {
-              showPostImport(r.doi, '', label);
-            })
-            .extractItemKey(r.result || r);
+          if (r.duplicate) {
+            setStatus('Pozycja już w kolekcji: ' + r.doi);
+            showDuplicateOffer(r);
+            showPostImport(r.doi, r.item_key, label, {
+              citationText: r.citation_text || '',
+              identifiers: { type: 'doi', value: r.doi },
+            });
+            loadStudyOverview();
+            return;
+          }
+          var itemKey = r.item_key || '';
+          if (!itemKey) {
+            google.script.run
+              .withSuccessHandler(function (k) { itemKey = k; finishDoiImport(r, itemKey, label); })
+              .withFailureHandler(function () { finishDoiImport(r, '', label); })
+              .extractItemKey(r.result || r);
+          } else {
+            finishDoiImport(r, itemKey, label);
+          }
         })
         .withFailureHandler(function (e) { setStatus(e.message, true); })
         .importDoi(doi, target);
+    }
+
+    function finishDoiImport(r, itemKey, label) {
+      var msg = 'Dodano DOI: ' + r.doi + ' → ' + label;
+      if (r.placeholder_replaced) {
+        msg += ' (zamieniono placeholder)';
+      } else if (r.placeholder_error) {
+        msg += '\n' + r.placeholder_error;
+      }
+      setStatus(msg, !!r.placeholder_error);
+      showPostImport(r.doi, itemKey, label, {
+        citationText: r.citation_text || '',
+        placeholderReplaced: r.placeholder_replaced,
+        placeholderError: r.placeholder_error,
+        identifiers: { type: 'doi', value: r.doi },
+      });
+      loadStudyOverview();
     }
 
     function doImportOrcid() {
@@ -491,7 +685,12 @@
       google.script.run
         .withSuccessHandler(function (r) {
           var s = r.summary || {};
-          setStatus('ORCID: dodano ' + (s.added_count || 0) + ', pominięto ' + (s.skipped_count || 0) + ', błędy ' + (s.error_count || 0));
+          setStatus(
+            'ORCID: dodano ' + (s.added_count || 0) +
+            ', pominięto ' + (s.skipped_count || 0) +
+            ' (w tym duplikaty), błędy ' + (s.error_count || 0)
+          );
+          loadStudyOverview();
         })
         .withFailureHandler(function (e) { setStatus(e.message, true); })
         .importOrcid(orcid, target, limit);
@@ -513,6 +712,7 @@
       loadDefaultCollection();
       loadCollections();
       loadStudiesOptional();
+      loadStudyOverview();
       setStatus('Wybierz domyślną kolekcję w Ustawieniach (jednorazowo).');
     }
 

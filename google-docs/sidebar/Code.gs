@@ -60,7 +60,28 @@ function importDoi(doi, options) {
   } else if (options && options.collectionKey) {
     payload.collection_key = options.collectionKey;
   }
-  return apiPost('/import/doi', payload);
+  var result = apiPost('/import/doi', payload);
+  var itemKey = result.item_key || extractItemKey_(result.result || result);
+  var citationText = result.citation_text || '';
+  if (!citationText && itemKey) {
+    try {
+      citationText = getItemCitationText(itemKey);
+    } catch (e) {
+      citationText = '';
+    }
+  }
+  if (citationText && !result.duplicate) {
+    try {
+      replacePlaceholderInDocument_(citationText, buildIdentifiers_('doi', result.doi || doi));
+      result.placeholder_replaced = true;
+    } catch (e) {
+      result.placeholder_error = e.message;
+    }
+  }
+  if (itemKey) {
+    rememberSessionItem_(result, itemKey, citationText);
+  }
+  return result;
 }
 
 function importOrcid(orcid, options, limit) {
@@ -74,6 +95,167 @@ function importOrcid(orcid, options, limit) {
     payload.collection_key = options.collectionKey;
   }
   return apiPost('/import/orcid', payload);
+}
+
+function getCollectionItems(collectionKey, limit) {
+  var key = String(collectionKey || '').trim();
+  if (!key) {
+    throw new Error('Brak klucza kolekcji.');
+  }
+  var lim = limit || 20;
+  return apiGet('/collection-items?collection_key=' + encodeURIComponent(key) + '&limit=' + lim);
+}
+
+function getItemCitationText(itemKey) {
+  var key = String(itemKey || '').trim();
+  if (!key) {
+    throw new Error('Brak klucza pozycji.');
+  }
+  var data = apiGet('/items/' + encodeURIComponent(key));
+  if (data.item && data.item.citation_text) {
+    return data.item.citation_text;
+  }
+  return formatCitationText_(data.item || {});
+}
+
+function pasteCitationForItem(itemKey, identifiers) {
+  var key = String(itemKey || '').trim();
+  if (!key) {
+    throw new Error('Brak klucza pozycji.');
+  }
+  var citationText = getItemCitationText(key);
+  replacePlaceholderInDocument_(citationText, identifiers || {});
+  return { replaced: true, citation_text: citationText, item_key: key };
+}
+
+/**
+ * Zamienia pierwszy placeholder w dokumencie na podany tekst.
+ * Kolejność: [*], potem [identyfikator] dopasowany do importu.
+ */
+function replacePlaceholderInDocument_(text, identifiers) {
+  identifiers = identifiers || {};
+  var body = DocumentApp.getActiveDocument().getBody();
+  var patterns = buildPlaceholderPatterns_(identifiers);
+
+  for (var i = 0; i < patterns.length; i++) {
+    if (replaceFirstLiteral_(body, patterns[i], text)) {
+      return { pattern: patterns[i], text: text };
+    }
+  }
+
+  throw new Error(
+    'W dokumencie brak [*] ani [identyfikator] — wpisz placeholder i spróbuj ponownie'
+  );
+}
+
+function buildPlaceholderPatterns_(identifiers) {
+  var patterns = ['[*]'];
+  var type = identifiers.type || '';
+  var value = String(identifiers.value || '').trim();
+
+  if (type === 'doi' && value) {
+    patterns.push('[doi]', '[' + value + ']', '[doi:' + value + ']');
+    var bare = value.replace(/^doi:/i, '');
+    if (bare !== value) {
+      patterns.push('[' + bare + ']');
+    }
+  } else if (type === 'orcid' && value) {
+    patterns.push('[orcid]', '[' + value + ']');
+  } else if (type === 'pmid' && value) {
+    patterns.push('[pmid]', '[' + value + ']');
+  } else if (value) {
+    patterns.push('[' + value + ']');
+  }
+
+  if (identifiers.extra && identifiers.extra.length) {
+    for (var j = 0; j < identifiers.extra.length; j++) {
+      var extra = String(identifiers.extra[j] || '').trim();
+      if (extra) {
+        patterns.push('[' + extra + ']');
+      }
+    }
+  }
+
+  var seen = {};
+  return patterns.filter(function (p) {
+    if (seen[p]) return false;
+    seen[p] = true;
+    return true;
+  });
+}
+
+function buildIdentifiers_(type, value) {
+  return { type: type, value: String(value || '').trim() };
+}
+
+function replaceFirstLiteral_(element, searchText, replacementText) {
+  var escaped = escapeRegexLiteral_(searchText);
+  var found = element.findText(escaped);
+  if (!found) {
+    return false;
+  }
+  found.setText(replacementText);
+  return true;
+}
+
+function escapeRegexLiteral_(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function formatCitationText_(item) {
+  if (!item) return '(?)';
+  if (item.citation_text) return item.citation_text;
+
+  var creators = item.creators || [];
+  var date = String(item.date || '');
+  var year = date.length >= 4 && /^\d{4}/.test(date) ? date.substring(0, 4) : '';
+  var author = '';
+  if (creators.length) {
+    var c = creators[0];
+    author = c.lastName || c.name || c.firstName || '';
+  }
+  if (author && year) return '(' + author + ', ' + year + ')';
+  if (author) return '(' + author + ')';
+  var title = String(item.title || '').trim();
+  if (title) {
+    return '(' + (title.length > 60 ? title.substring(0, 60) + '…' : title) + ')';
+  }
+  return '(?)';
+}
+
+function rememberSessionItem_(importResult, itemKey, citationText) {
+  if (!itemKey) return;
+  var props = PropertiesService.getDocumentProperties();
+  var raw = props.getProperty('sessionItems') || '[]';
+  var items;
+  try {
+    items = JSON.parse(raw);
+  } catch (e) {
+    items = [];
+  }
+  if (!Array.isArray(items)) items = [];
+
+  var entry = {
+    key: itemKey,
+    doi: importResult.doi || '',
+    title: importResult.title || (importResult.existing && importResult.existing.title) || '',
+    citation_text: citationText || importResult.citation_text || '',
+    at: new Date().toISOString(),
+  };
+  items = items.filter(function (it) { return it.key !== itemKey; });
+  items.unshift(entry);
+  if (items.length > 30) items = items.slice(0, 30);
+  props.setProperty('sessionItems', JSON.stringify(items));
+}
+
+function getSessionItems() {
+  var raw = PropertiesService.getDocumentProperties().getProperty('sessionItems') || '[]';
+  try {
+    var items = JSON.parse(raw);
+    return Array.isArray(items) ? items : [];
+  } catch (e) {
+    return [];
+  }
 }
 
 function getLastStatus() {

@@ -108,9 +108,114 @@ class ZoteroWebClient:
         items.sort(key=lambda item: (item["name"] or item["key"]).lower())
         return items
 
+    def find_item_by_doi(self, doi: str) -> dict | None:
+        """Szuka pozycji w bibliotece po DOI (Web API q=)."""
+        doi = doi.strip()
+        user_id = self.resolve_user_id()
+        response = self._session.get(
+            f"{ZOTERO_WEB_API_BASE}/users/{user_id}/items",
+            params={"q": f'doi:"{doi}"', "limit": 5},
+            timeout=self.timeout,
+        )
+        if response.status_code != 200:
+            return None
+        try:
+            raw = response.json()
+        except ValueError:
+            return None
+        if not isinstance(raw, list):
+            return None
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            data = entry.get("data") or {}
+            item_doi = (data.get("DOI") or "").strip().lower()
+            if item_doi == doi.lower():
+                return self._summarize_item(entry)
+        return None
+
+    def find_item_in_collection_by_doi(self, doi: str, collection_key: str) -> dict | None:
+        """Zwraca pozycję już w kolekcji o danym DOI, lub None."""
+        item = self.find_item_by_doi(doi)
+        if not item:
+            return None
+        collections = item.get("collections") or []
+        if collection_key in collections:
+            return item
+        return None
+
+    def list_collection_items(self, collection_key: str, limit: int = 20) -> list[dict]:
+        """Ostatnie pozycje z kolekcji (sortowane po dacie dodania)."""
+        user_id = self.resolve_user_id()
+        limit = max(1, min(limit, 100))
+        response = self._session.get(
+            f"{ZOTERO_WEB_API_BASE}/users/{user_id}/collections/{collection_key}/items/top",
+            params={"limit": limit, "sort": "dateAdded", "direction": "desc"},
+            timeout=self.timeout,
+        )
+        if response.status_code != 200:
+            raise ZoteroClientError(
+                f"Web API list collection items failed: HTTP {response.status_code} — "
+                f"{response.text[:500]}",
+                response.status_code,
+            )
+        try:
+            raw = response.json()
+        except ValueError as exc:
+            raise ZoteroClientError(
+                f"list collection items: invalid JSON — {response.text[:200]}",
+                response.status_code,
+            ) from exc
+        if not isinstance(raw, list):
+            raise ZoteroClientError(
+                f"list collection items: expected JSON array, got {type(raw).__name__}",
+                response.status_code,
+            )
+        return [self._summarize_item(entry) for entry in raw if isinstance(entry, dict)]
+
+    def get_item(self, item_key: str) -> dict | None:
+        user_id = self.resolve_user_id()
+        response = self._session.get(
+            f"{ZOTERO_WEB_API_BASE}/users/{user_id}/items/{item_key}",
+            timeout=self.timeout,
+        )
+        if response.status_code != 200:
+            return None
+        try:
+            entry = response.json()
+        except ValueError:
+            return None
+        if isinstance(entry, dict):
+            return self._summarize_item(entry)
+        return None
+
+    def _summarize_item(self, entry: dict) -> dict:
+        data = entry.get("data") or {}
+        creators = data.get("creators") or []
+        return {
+            "key": entry.get("key", ""),
+            "title": data.get("title", ""),
+            "doi": data.get("DOI", ""),
+            "date": data.get("date", ""),
+            "itemType": data.get("itemType", ""),
+            "creators": creators,
+            "collections": data.get("collections") or [],
+            "citation_text": format_citation_text(data),
+        }
+
     def add_item_by_id(self, identifier: str, collection_key: str) -> dict:
         """Import DOI (lub innego identyfikatora) do kolekcji przez Web API."""
         doi = identifier.strip()
+        existing = self.find_item_in_collection_by_doi(doi, collection_key)
+        if existing:
+            return {
+                "duplicate": True,
+                "via": "web_api",
+                "key": existing["key"],
+                "itemKey": existing["key"],
+                "collection_key": collection_key,
+                "existing": existing,
+            }
         try:
             metadata = fetch_crossref_metadata(doi)
         except requests.RequestException as exc:
@@ -196,3 +301,26 @@ class ZoteroWebClient:
         except ZoteroClientError as exc:
             summary["error"] = str(exc)
         return summary
+
+
+def format_citation_text(data: dict) -> str:
+    """Prosty tekst cytowania (autor, rok) do wstawienia zamiast placeholdera."""
+    creators = data.get("creators") or []
+    date = str(data.get("date") or "")
+    year = date[:4] if len(date) >= 4 and date[:4].isdigit() else ""
+
+    author = ""
+    if creators:
+        first = creators[0]
+        author = first.get("lastName") or first.get("name") or ""
+        if not author and first.get("firstName"):
+            author = first["firstName"]
+
+    if author and year:
+        return f"({author}, {year})"
+    if author:
+        return f"({author})"
+    title = (data.get("title") or "").strip()
+    if title:
+        return f"({title[:60]}{'…' if len(title) > 60 else ''})"
+    return "(?)"

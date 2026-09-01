@@ -6,6 +6,8 @@ import time
 import requests
 from django.conf import settings
 
+from .zotero_web import format_citation_text
+
 logger = logging.getLogger(__name__)
 
 
@@ -52,7 +54,102 @@ class ZoteroClient:
         except ValueError:
             return {"raw": response.text}
 
+    def _summarize_item(self, entry: dict) -> dict:
+        data = entry.get("data") or {}
+        creators = data.get("creators") or []
+        return {
+            "key": entry.get("key", ""),
+            "title": data.get("title", ""),
+            "doi": data.get("DOI", ""),
+            "date": data.get("date", ""),
+            "itemType": data.get("itemType", ""),
+            "creators": creators,
+            "collections": data.get("collections") or [],
+            "citation_text": format_citation_text(data),
+        }
+
+    def find_item_by_doi(self, doi: str) -> dict | None:
+        response = self._request(
+            "GET",
+            "/api/users/0/items",
+            params={"q": f'doi:"{doi.strip()}"', "limit": 5},
+        )
+        if response.status_code != 200:
+            return None
+        try:
+            raw = response.json()
+        except ValueError:
+            return None
+        if not isinstance(raw, list):
+            return None
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            data = entry.get("data") or {}
+            item_doi = (data.get("DOI") or "").strip().lower()
+            if item_doi == doi.strip().lower():
+                return self._summarize_item(entry)
+        return None
+
+    def find_item_in_collection_by_doi(self, doi: str, collection_key: str) -> dict | None:
+        item = self.find_item_by_doi(doi)
+        if not item:
+            return None
+        collections = item.get("collections") or []
+        if collection_key in collections:
+            return item
+        return None
+
+    def list_collection_items(self, collection_key: str, limit: int = 20) -> list[dict]:
+        limit = max(1, min(limit, 100))
+        response = self._request(
+            "GET",
+            f"/api/users/0/collections/{collection_key}/items/top",
+            params={"limit": limit, "sort": "dateAdded", "direction": "desc"},
+        )
+        if response.status_code != 200:
+            raise ZoteroClientError(
+                f"list collection items failed: HTTP {response.status_code} — {response.text[:500]}",
+                response.status_code,
+            )
+        try:
+            raw = response.json()
+        except ValueError as exc:
+            raise ZoteroClientError(
+                f"list collection items: invalid JSON — {response.text[:200]}",
+                response.status_code,
+            ) from exc
+        if not isinstance(raw, list):
+            raise ZoteroClientError(
+                f"list collection items: expected JSON array, got {type(raw).__name__}",
+                response.status_code,
+            )
+        return [self._summarize_item(entry) for entry in raw if isinstance(entry, dict)]
+
+    def get_item(self, item_key: str) -> dict | None:
+        response = self._request("GET", f"/api/users/0/items/{item_key}")
+        if response.status_code != 200:
+            return None
+        try:
+            entry = response.json()
+        except ValueError:
+            return None
+        if isinstance(entry, dict):
+            return self._summarize_item(entry)
+        return None
+
     def add_item_by_id(self, identifier: str, collection_key: str) -> dict:
+        doi = identifier.strip()
+        existing = self.find_item_in_collection_by_doi(doi, collection_key)
+        if existing:
+            return {
+                "duplicate": True,
+                "via": "local_api",
+                "key": existing["key"],
+                "itemKey": existing["key"],
+                "collection_key": collection_key,
+                "existing": existing,
+            }
         response = self._request(
             "POST",
             "/api/plus/add-item-by-id",

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import requests
 from django.conf import settings
 
-from .zotero import ZoteroClient, ZoteroClientError
+from .zotero import ZoteroClient, ZoteroClientError, get_zotero_client
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,10 @@ def import_orcid_works(
     limit: int = 50,
     zotero: ZoteroClient | None = None,
 ) -> OrcidImportReport:
-    client = zotero or ZoteroClient()
+    if zotero is None:
+        client, _source = get_zotero_client()
+    else:
+        client = zotero
     report = OrcidImportReport(orcid=orcid, study=study)
 
     try:
@@ -114,7 +117,17 @@ def import_orcid_works(
             continue
 
         try:
-            client.add_item_by_id(doi, collection_key)
+            result = client.add_item_by_id(doi, collection_key)
+            if isinstance(result, dict) and result.get("duplicate"):
+                report.skipped.append(
+                    {
+                        "doi": doi,
+                        "title": title,
+                        "reason": "już w kolekcji",
+                        "item_key": result.get("key", ""),
+                    }
+                )
+                continue
             report.added.append(doi)
             time.sleep(settings.ORCID_RATE_LIMIT_DELAY)
         except ZoteroClientError as exc:

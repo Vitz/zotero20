@@ -133,12 +133,38 @@ def import_doi(request):
     except ZoteroClientError as exc:
         return JsonResponse({"error": str(exc)}, status=502)
 
+    if isinstance(result, dict) and result.get("duplicate"):
+        existing = result.get("existing") or {}
+        return JsonResponse(
+            {
+                "duplicate": True,
+                "message": "Pozycja już w kolekcji",
+                "doi": doi,
+                "collection_key": collection_key,
+                "source": source,
+                "item_key": result.get("key", ""),
+                "title": existing.get("title", ""),
+                "citation_text": existing.get("citation_text", ""),
+                "result": result,
+            }
+        )
+
+    item_key = ""
+    citation_text = ""
+    if isinstance(result, dict):
+        item_key = result.get("key") or result.get("itemKey") or ""
+        existing = result.get("existing") or {}
+        if existing.get("citation_text"):
+            citation_text = existing["citation_text"]
+
     response = {
         "success": True,
         "doi": doi,
         "collection_key": collection_key,
         "source": source,
         "result": result,
+        "item_key": item_key,
+        "citation_text": citation_text,
     }
     if study:
         response["study"] = study
@@ -190,3 +216,47 @@ def import_orcid(request):
     payload = report.to_dict()
     payload["collection_key"] = collection_key
     return JsonResponse(payload, status=status)
+
+
+@json_api
+def collection_items(request):
+    if request.method != "GET":
+        return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
+
+    collection_key = (request.GET.get("collection_key") or "").strip()
+    if not collection_key:
+        return JsonResponse({"error": "Wymagany parametr: collection_key."}, status=400)
+
+    limit = int(request.GET.get("limit", 20))
+    limit = max(1, min(limit, 100))
+
+    client, source = get_zotero_client()
+    try:
+        items = client.list_collection_items(collection_key, limit=limit)
+    except ZoteroClientError as exc:
+        return JsonResponse({"error": str(exc)}, status=502)
+
+    return JsonResponse(
+        {
+            "collection_key": collection_key,
+            "source": source,
+            "items": items,
+        }
+    )
+
+
+@json_api
+def item_detail(request, item_key):
+    if request.method != "GET":
+        return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
+
+    client, source = get_zotero_client()
+    try:
+        item = client.get_item(item_key)
+    except ZoteroClientError as exc:
+        return JsonResponse({"error": str(exc)}, status=502)
+
+    if not item:
+        return JsonResponse({"error": "Nie znaleziono pozycji."}, status=404)
+
+    return JsonResponse({"source": source, "item": item})

@@ -6,6 +6,9 @@
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
+const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
+const NAMED_RANGE_BIBLIOGRAPHY = 'ZOTERO20_BIBLIOGRAPHY';
+const BIBLIOGRAPHY_HEADING = 'Bibliografia';
 
 function onOpen() {
   DocumentApp.getUi()
@@ -104,6 +107,133 @@ function getCollectionItems(collectionKey, limit) {
   }
   var lim = limit || 20;
   return apiGet('/collection-items?collection_key=' + encodeURIComponent(key) + '&limit=' + lim);
+}
+
+function getBibliographyStyles() {
+  return apiGet('/styles');
+}
+
+function getBibliographyStyle() {
+  var props = PropertiesService.getScriptProperties();
+  return props.getProperty(PROP_BIBLIOGRAPHY_STYLE) || 'apa';
+}
+
+function saveBibliographyStyle(styleId) {
+  styleId = String(styleId || '').trim();
+  if (!styleId) {
+    throw new Error('Wybierz styl bibliografii.');
+  }
+  PropertiesService.getScriptProperties().setProperty(PROP_BIBLIOGRAPHY_STYLE, styleId);
+  return getBibliographyStyle();
+}
+
+function insertBibliography() {
+  return upsertBibliography_(false);
+}
+
+function refreshBibliography() {
+  return upsertBibliography_(true);
+}
+
+function upsertBibliography_(isRefresh) {
+  var collection = getDefaultCollection();
+  if (!collection.key) {
+    throw new Error('Ustaw domyślną kolekcję w zakładce Ustawienia.');
+  }
+  var style = getBibliographyStyle();
+  var data = apiPost('/bibliography', {
+    collection_key: collection.key,
+    style: style,
+  });
+  var entries = data.entries || [];
+  if (!entries.length) {
+    throw new Error('Kolekcja jest pusta — brak pozycji do bibliografii.');
+  }
+  var result = writeBibliographyToDocument_(entries, data.style_label || style, isRefresh);
+  result.collection_key = collection.key;
+  result.collection_name = collection.name;
+  result.style = data.style || style;
+  result.style_label = data.style_label || style;
+  result.item_count = data.item_count || entries.length;
+  return result;
+}
+
+/**
+ * Wstawia lub odświeża sekcję bibliografii na końcu dokumentu.
+ * Zakres oznaczony NamedRange ZOTERO20_BIBLIOGRAPHY (nagłówek + wpisy).
+ */
+function writeBibliographyToDocument_(entries, styleLabel, isRefresh) {
+  var doc = DocumentApp.getActiveDocument();
+  var body = doc.getBody();
+  var hadExisting = removeBibliographySection_(doc, body);
+
+  if (isRefresh && !hadExisting) {
+    throw new Error('Brak bibliografii w dokumencie — użyj „Wstaw literaturę”.');
+  }
+
+  body.appendParagraph(BIBLIOGRAPHY_HEADING).setHeading(DocumentApp.ParagraphHeading.HEADING1);
+  var startIdx = body.getNumChildren() - 1;
+
+  for (var i = 0; i < entries.length; i++) {
+    body.appendParagraph(String(entries[i]));
+  }
+
+  var rangeBuilder = body.newRange();
+  for (var j = startIdx; j < body.getNumChildren(); j++) {
+    var child = body.getChild(j);
+    if (child.getType() !== DocumentApp.ElementType.PARAGRAPH) {
+      continue;
+    }
+    var paragraph = child.asParagraph();
+    var text = paragraph.getText();
+    if (!text) {
+      continue;
+    }
+    rangeBuilder.addElement(paragraph, 0, text.length - 1);
+  }
+
+  doc.addNamedRange(NAMED_RANGE_BIBLIOGRAPHY, rangeBuilder.build());
+
+  return {
+    inserted: !hadExisting,
+    refreshed: hadExisting,
+    item_count: entries.length,
+    style_label: styleLabel,
+  };
+}
+
+function removeBibliographySection_(doc, body) {
+  var named = doc.getNamedRanges(NAMED_RANGE_BIBLIOGRAPHY);
+  if (!named || !named.length) {
+    return false;
+  }
+
+  var range = named[0].getRange();
+  var elements = range.getRangeElements();
+  var seen = {};
+  for (var i = 0; i < elements.length; i++) {
+    var element = elements[i].getElement();
+    if (!element || !element.getParent) {
+      continue;
+    }
+    var parent = element.getParent();
+    if (parent && parent.getType && parent.getType() === DocumentApp.ElementType.BODY) {
+      var idx = parent.getChildIndex(element);
+      if (idx >= 0) {
+        seen[idx] = element;
+      }
+    }
+  }
+
+  named[0].remove();
+
+  var indices = Object.keys(seen).map(function (k) { return parseInt(k, 10); });
+  indices.sort(function (a, b) { return b - a; });
+  for (var j = 0; j < indices.length; j++) {
+    body.getChild(indices[j]).removeFromParent();
+  }
+
+  return indices.length > 0;
 }
 
 function getItemCitationText(itemKey) {

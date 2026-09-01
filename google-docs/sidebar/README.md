@@ -10,7 +10,9 @@ Base URL: `https://zotero.keyweb.pl/api/v1`
 - wpisz w dokumencie `[*]` albo `[10.1038/...]` / `[doi:...]` przed importem,
 - po imporcie DOI placeholder zostanie zamieniony automatycznie (albo użyj przycisku **Wklej zamiast [*]**).
 
-To **nie** są field codes Zotero — nie odświeżają się po zmianie stylu. Pełne cytowania (APA, numeracja, bibliografia, Refresh) nadal wymagają menu **Zotero** przez **Zotero20 Connector**.
+**Prosta bibliografia** — zakładka **Literatura**: wstawia listę źródeł z domyślnej kolekcji na końcu dokumentu (styl CSL przez Zotero API). Odświeżanie zastępuje sekcję oznaczoną `ZOTERO20_BIBLIOGRAPHY`.
+
+To **nie** są field codes Zotero — cytowania w tekście nie odświeżają się po zmianie stylu. Pełne cytowania (numeracja, ibid., linkowanie cytat↔bibliografia) nadal wymagają menu **Zotero** przez **Zotero20 Connector**.
 
 ## Script Properties
 
@@ -19,6 +21,7 @@ To **nie** są field codes Zotero — nie odświeżają się po zmianie stylu. P
 | `ZOTERO20_API_KEY` | klucz z `server/.env` (wymagany) |
 | `ZOTERO20_DEFAULT_COLLECTION_KEY` | 8-znakowy klucz kolekcji Zotero (ustawiany w panelu, zakładka Ustawienia) |
 | `ZOTERO20_DEFAULT_COLLECTION_NAME` | nazwa kolekcji (cache do wyświetlania) |
+| `ZOTERO20_BIBLIOGRAPHY_STYLE` | styl CSL bibliografii (np. `apa`, `ieee`) |
 
 ## Użycie
 
@@ -27,7 +30,8 @@ To **nie** są field codes Zotero — nie odświeżają się po zmianie stylu. P
 3. W dokumencie wpisz placeholder: `[*]` lub `[10.1038/...]` (DOI importowanej pracy).
 4. Importuj DOI lub ORCID — trafiają automatycznie do zapisanej kolekcji.
 5. Po imporcie DOI: jeśli placeholder jest w dokumencie, zostanie zamieniony na `(Autor, rok)`. W razie potrzeby użyj **Wklej zamiast [*]**.
-6. Pełne cytowania Zotero (field codes, bibliografia, Refresh): menu **Zotero → Dodaj/edytuj cytowanie**.
+6. Zakładka **Literatura** → wybierz styl → **Wstaw literaturę** (lub **Odśwież bibliografię** po zmianie kolekcji/stylu).
+7. Pełne cytowania Zotero (field codes, Refresh): menu **Zotero → Dodaj/edytuj cytowanie**.
 
 Opcjonalnie: sekcja **Zaawansowane** nadpisuje badaniem z `studies.yaml` (dla zespołów z wieloma badaniami). Pojedynczy użytkownik może pominąć `studies.yaml`.
 
@@ -36,8 +40,9 @@ Opcjonalnie: sekcja **Zaawansowane** nadpisuje badaniem z `studies.yaml` (dla ze
 | Funkcja | Gdzie |
 |---------|--------|
 | Prosty tekst `(Autor, rok)` zamiast `[*]` | Panel **Zotero20 Import** (Apps Script) |
+| Bibliografia (lista na końcu dokumentu) | Panel **Zotero20 Import** → zakładka **Literatura** |
 | Wstaw/edytuj cytowanie (field codes) | Menu **Zotero** (Zotero20 Connector) |
-| Bibliografia | **Zotero → Dodaj/edytuj bibliografię** |
+| Bibliografia z field codes + Refresh | **Zotero → Dodaj/edytuj bibliografię** |
 | Styl (APA, IEEE, …) | **Zotero → Preferencje dokumentu** |
 | Odświeżenie pól | **Zotero → Refresh** |
 | Odlinkowanie | **Zotero → Unlink Citations** |
@@ -83,5 +88,7 @@ Test z serwera:
 
 ```bash
 curl -sS -H "X-API-Key: $ZOTERO20_API_KEY" https://zotero.keyweb.pl/api/v1/collections
-curl -sS -H "X-API-Key: $ZOTERO20_API_KEY" https://zotero.keyweb.pl/api/v1/studies
+curl -sS -H "X-API-Key: $ZOTERO20_API_KEY" https://zotero.keyweb.pl/api/v1/styles
+curl -sS -H "X-API-Key: $ZOTERO20_API_KEY" -H "Content-Type: application/json" \
+  -d '{"collection_key":"FVIAD3D8","style":"apa"}' https://zotero.keyweb.pl/api/v1/bibliography
 ```

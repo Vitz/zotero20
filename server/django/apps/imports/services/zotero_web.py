@@ -294,6 +294,27 @@ class ZoteroWebClient:
 
         return ""
 
+    def fetch_collection_bibliography(
+        self,
+        collection_key: str,
+        style: str,
+        locale: str = "pl-PL",
+    ) -> str:
+        user_id = self.resolve_user_id()
+        response = self._session.get(
+            f"{ZOTERO_WEB_API_BASE}/users/{user_id}/collections/{collection_key}/items/top",
+            params={"format": "bib", "style": style, "locale": locale},
+            headers={"Accept": "text/html"},
+            timeout=self.timeout,
+        )
+        if response.status_code != 200:
+            raise ZoteroClientError(
+                f"Web API bibliography export failed: HTTP {response.status_code} — "
+                f"{response.text[:500]}",
+                response.status_code,
+            )
+        return response.text
+
     def health_summary(self) -> dict:
         summary = {"api": "web", "configured": True, "user_id": None, "collections_count": None}
         try:

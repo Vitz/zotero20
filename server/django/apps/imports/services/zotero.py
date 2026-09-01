@@ -239,6 +239,25 @@ class ZoteroClient:
         items.sort(key=lambda item: (item["name"] or item["key"]).lower())
         return items
 
+    def fetch_collection_bibliography(
+        self,
+        collection_key: str,
+        style: str,
+        locale: str = "pl-PL",
+    ) -> str:
+        response = self._request(
+            "GET",
+            f"/api/users/0/collections/{collection_key}/items/top",
+            params={"format": "bib", "style": style, "locale": locale},
+            headers={"Accept": "text/html"},
+        )
+        if response.status_code != 200:
+            raise ZoteroClientError(
+                f"bibliography export failed: HTTP {response.status_code} — {response.text[:500]}",
+                response.status_code,
+            )
+        return response.text
+
     def health_summary(self) -> dict:
         summary = {"zotero_url": self.base_url, "ping": None, "api_plus": None}
         try:

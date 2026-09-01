@@ -1,6 +1,7 @@
 from django.http import JsonResponse
 
 from apps.imports.middleware import json_api, normalize_doi, normalize_orcid, parse_json_body
+from .services.bibliography import DEFAULT_STYLE_ID, export_collection_bibliography, list_styles, resolve_style_id
 from .services.orcid import import_orcid_works
 from .services.studies import StudiesConfigError, list_studies, resolve_collection_key
 from .services.exceptions import ZoteroClientError
@@ -244,6 +245,40 @@ def collection_items(request):
             "items": items,
         }
     )
+
+
+@json_api
+def styles_list(request):
+    if request.method != "GET":
+        return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
+    return JsonResponse({"styles": list_styles(), "default": DEFAULT_STYLE_ID})
+
+
+@json_api
+def bibliography_generate(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
+
+    body = parse_json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Nieprawidłowy JSON."}, status=400)
+
+    collection_key = (body.get("collection_key") or "").strip()
+    if not collection_key:
+        return JsonResponse({"error": "Wymagane pole: collection_key."}, status=400)
+
+    try:
+        style = resolve_style_id(body.get("style"))
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    client, source = get_zotero_client()
+    try:
+        payload = export_collection_bibliography(client, source, collection_key, style)
+    except ZoteroClientError as exc:
+        return JsonResponse({"error": str(exc)}, status=502)
+
+    return JsonResponse(payload)
 
 
 @json_api

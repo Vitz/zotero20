@@ -103,6 +103,7 @@
     <button type="button" onclick="showTab('settings')">Ustawienia</button>
     <button type="button" onclick="showTab('doi')">DOI</button>
     <button type="button" onclick="showTab('orcid')">ORCID</button>
+    <button type="button" onclick="showTab('biblio')">Literatura</button>
     <button type="button" onclick="showTab('status')">Status</button>
   </div>
 
@@ -169,6 +170,24 @@
     </details>
   </div>
 
+  <div id="tab-biblio" class="tab">
+    <div id="current-collection-biblio" class="current-collection" style="display:none;">
+      <strong>Domyślna kolekcja</strong>
+      <span id="current-collection-biblio-label"></span>
+    </div>
+    <p>Generuje listę literatury z domyślnej kolekcji na końcu dokumentu (jak Zotero → Wstaw bibliografię).</p>
+    <label for="biblio-style">Styl cytowań (CSL)</label>
+    <select id="biblio-style" disabled>
+      <option value="">Ładowanie stylów…</option>
+    </select>
+    <button id="btn-insert-biblio" type="button" onclick="doInsertBibliography()" disabled>Wstaw literaturę</button>
+    <button id="btn-refresh-biblio" type="button" onclick="doRefreshBibliography()" disabled>Odśwież bibliografię</button>
+    <p class="hint" style="font-size:11px;color:#555;margin-top:10px;">
+      „Odśwież” zastępuje istniejącą sekcję (nagłówek <strong>Bibliografia</strong> + wpisy).
+      Zmiana stylu wymaga odświeżenia. Limit: do 150 pozycji (Zotero API).
+    </p>
+  </div>
+
   <div id="tab-status" class="tab">
     <button type="button" onclick="loadStatus()">Odśwież status</button>
     <pre id="status-text"></pre>
@@ -208,6 +227,8 @@
       defaultCollection: { key: '', name: '' },
       studies: [],
       configuredStudies: 0,
+      bibliographyStyles: [],
+      bibliographyStyle: 'apa',
     };
 
     function updateCollectionsSourceHint(source) {
@@ -466,12 +487,133 @@
     function setImportEnabled(enabled) {
       document.getElementById('btn-import-doi').disabled = !enabled;
       document.getElementById('btn-import-orcid').disabled = !enabled;
+      setBibliographyEnabled(enabled);
+    }
+
+    function setBibliographyEnabled(enabled) {
+      var styleSel = document.getElementById('biblio-style');
+      var hasStyles = appState.bibliographyStyles.length > 0;
+      document.getElementById('btn-insert-biblio').disabled = !enabled;
+      document.getElementById('btn-refresh-biblio').disabled = !enabled;
+      if (styleSel) {
+        styleSel.disabled = !enabled || !hasStyles;
+      }
+    }
+
+    function fillBibliographyStyles(styles, selectedId) {
+      var sel = document.getElementById('biblio-style');
+      if (!sel) return;
+      sel.innerHTML = '';
+      if (!styles || !styles.length) {
+        var empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = '(brak stylów)';
+        sel.appendChild(empty);
+        sel.disabled = true;
+        return;
+      }
+      styles.forEach(function (s) {
+        var opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.label || s.id;
+        if (selectedId && s.id === selectedId) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+      sel.disabled = !appState.defaultCollection.key;
+    }
+
+    function loadBibliographyStyles() {
+      google.script.run
+        .withSuccessHandler(function (data) {
+          appState.bibliographyStyles = (data && data.styles) || [];
+          if (data && data.default) {
+            appState.bibliographyStyle = data.default;
+          }
+          google.script.run
+            .withSuccessHandler(function (saved) {
+              if (saved) appState.bibliographyStyle = saved;
+              fillBibliographyStyles(appState.bibliographyStyles, appState.bibliographyStyle);
+              setBibliographyEnabled(!!appState.defaultCollection.key);
+            })
+            .withFailureHandler(function () {
+              fillBibliographyStyles(appState.bibliographyStyles, appState.bibliographyStyle);
+            })
+            .getBibliographyStyle();
+        })
+        .withFailureHandler(function () {
+          fillBibliographyStyles([], '');
+        })
+        .getBibliographyStyles();
+    }
+
+    function persistBibliographyStyle(styleId) {
+      google.script.run
+        .withSuccessHandler(function (saved) {
+          appState.bibliographyStyle = saved || styleId;
+        })
+        .withFailureHandler(function () {})
+        .saveBibliographyStyle(styleId);
+    }
+
+    function doInsertBibliography() {
+      if (!appState.defaultCollection.key) {
+        setStatus('Ustaw domyślną kolekcję w zakładce Ustawienia.', true);
+        showTab('settings');
+        return;
+      }
+      var styleId = document.getElementById('biblio-style').value;
+      if (styleId) persistBibliographyStyle(styleId);
+      setBibliographyButtonsDisabled(true);
+      setStatus('Generuję bibliografię…');
+      google.script.run
+        .withSuccessHandler(function (r) {
+          setBibliographyButtonsDisabled(false);
+          var msg = 'Wstawiono bibliografię (' + (r.item_count || 0) + ' pozycji, ' + (r.style_label || '') + ').';
+          setStatus(msg, false);
+          google.script.run.showPasteAlert(msg, false);
+        })
+        .withFailureHandler(function (e) {
+          setBibliographyButtonsDisabled(false);
+          setStatus(formatScriptError(e), true);
+        })
+        .insertBibliography();
+    }
+
+    function doRefreshBibliography() {
+      if (!appState.defaultCollection.key) {
+        setStatus('Ustaw domyślną kolekcję w zakładce Ustawienia.', true);
+        showTab('settings');
+        return;
+      }
+      var styleId = document.getElementById('biblio-style').value;
+      if (styleId) persistBibliographyStyle(styleId);
+      setBibliographyButtonsDisabled(true);
+      setStatus('Odświeżam bibliografię…');
+      google.script.run
+        .withSuccessHandler(function (r) {
+          setBibliographyButtonsDisabled(false);
+          var msg = 'Odświeżono bibliografię (' + (r.item_count || 0) + ' pozycji, ' + (r.style_label || '') + ').';
+          setStatus(msg, false);
+          google.script.run.showPasteAlert(msg, false);
+        })
+        .withFailureHandler(function (e) {
+          setBibliographyButtonsDisabled(false);
+          setStatus(formatScriptError(e), true);
+        })
+        .refreshBibliography();
+    }
+
+    function setBibliographyButtonsDisabled(disabled) {
+      document.getElementById('btn-insert-biblio').disabled = !!disabled || !appState.defaultCollection.key;
+      document.getElementById('btn-refresh-biblio').disabled = !!disabled || !appState.defaultCollection.key;
     }
 
     function updateCurrentCollectionLabels() {
       var label = appState.defaultCollection.name || appState.defaultCollection.key || '';
       var hasDefault = !!appState.defaultCollection.key;
-      ['doi', 'orcid'].forEach(function (suffix) {
+      ['doi', 'orcid', 'biblio'].forEach(function (suffix) {
         var box = document.getElementById('current-collection-' + suffix);
         var text = document.getElementById('current-collection-' + suffix + '-label');
         if (hasDefault) {
@@ -761,6 +903,7 @@
       loadDefaultCollection();
       loadCollections();
       loadStudiesOptional();
+      loadBibliographyStyles();
       loadStudyOverview();
       setStatus('Wybierz domyślną kolekcję w Ustawieniach (jednorazowo).');
     }

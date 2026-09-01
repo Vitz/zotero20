@@ -12,6 +12,7 @@ fi
 
 if [ "$1" = "gunicorn" ]; then
   shift
+  python manage.py collectstatic --noinput
   exec gunicorn zotero20.wsgi:application \
     --bind "0.0.0.0:8000" \
     --workers "${GUNICORN_WORKERS:-1}" \

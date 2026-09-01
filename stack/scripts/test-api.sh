@@ -22,6 +22,12 @@ echo "== health =="
 curl -sS "$BASE/api/v1/health"
 echo
 
+echo "== admin static (CSS) =="
+curl -sS -f -o /dev/null -w "HTTP %{http_code}\n" "$BASE/static/admin/css/base.css"
+
+echo "== admin login page =="
+curl -sS -f -o /dev/null -w "HTTP %{http_code}\n" "$BASE/app/login/"
+
 echo "== studies / collections (wymaga X-API-Key) =="
 STUDIES_JSON=$(curl -sS "${HDR[@]}" "$BASE/api/v1/studies")
 echo "$STUDIES_JSON"

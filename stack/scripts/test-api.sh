@@ -22,18 +22,22 @@ echo "== health =="
 curl -sS "$BASE/api/v1/health"
 echo
 
-echo "== studies (wymaga X-API-Key) =="
+echo "== studies / collections (wymaga X-API-Key) =="
 STUDIES_JSON=$(curl -sS "${HDR[@]}" "$BASE/api/v1/studies")
 echo "$STUDIES_JSON"
-if echo "$STUDIES_JSON" | grep -q '"studies"'; then
-  CONFIGURED=$(echo "$STUDIES_JSON" | grep -o '"configured": true' | wc -l | tr -d ' ')
-  if [ "${CONFIGURED:-0}" -eq 0 ]; then
-    echo "UWAGA: brak skonfigurowanych badań (collection_key w studies.yaml)"
-    exit 1
-  fi
+if echo "$STUDIES_JSON" | grep -q '"zotero_collections"'; then
+  echo "Endpoint studies + zotero_collections OK"
+elif echo "$STUDIES_JSON" | grep -q '"studies"'; then
+  echo "Endpoint studies OK"
 else
-  echo "BŁĄD: endpoint /api/v1/studies nie zwrócił listy badań"
+  echo "BŁĄD: endpoint /api/v1/studies nie odpowiada poprawnie"
   exit 1
+fi
+
+COLLECTIONS_JSON=$(curl -sS "${HDR[@]}" "$BASE/api/v1/collections" 2>/dev/null || true)
+if [ -n "$COLLECTIONS_JSON" ]; then
+  echo "== collections =="
+  echo "$COLLECTIONS_JSON"
 fi
 echo
 

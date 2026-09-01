@@ -77,7 +77,7 @@ Repozytorium: [GOKORURI007/zotero-api-plus](https://github.com/GOKORURI007/zoter
 
 To **nie zastępuje** citing protocol — tylko przyspiesza dodawanie źródeł (ścieżka A: sidebar → Django → ten endpoint).
 
-### 5. Zotero Web API (zotero.org) — pomocniczo
+### 5. Zotero Web API (zotero.org) — import i kolekcje bez VNC
 
 Dokumentacja: [Web API v3](https://www.zotero.org/support/dev/web_api/v3/start)
 
@@ -85,9 +85,17 @@ Dokumentacja: [Web API v3](https://www.zotero.org/support/dev/web_api/v3/start)
 |--------|------------|
 | Sync biblioteki Desktop ↔ chmura | **tak** — backup, drugi komputer |
 | Bezpośrednie cytowania w Google Docs | **nie** — brak citing protocol |
-| Import DOI zamiast Local API | **nie** — opóźnienie sync przed Refresh |
+| Lista kolekcji w sidebarze Google Docs | **tak** — gdy ustawiony `ZOTERO_WEB_API_KEY` |
+| Import DOI do kolekcji zotero.org | **tak** — `POST /api/v1/import/doi` przez Web API |
 
-Sync z kontem zotero.org jest **opcjonalnym backupem**, nie ścieżką krytyczną dla Docs.
+**Konfiguracja:** klucz API z [zotero.org/settings/keys](https://www.zotero.org/settings/keys) z uprawnieniami do biblioteki (odczyt + zapis). W `.env` / GitHub Secrets:
+
+- `ZOTERO_WEB_API_KEY` — klucz API (w Actions: secret `ZOTERO_API_RW` lub `ZOTER_API_RW`)
+- `ZOTERO_WEB_USER_ID` — opcjonalnie; jeśli puste, Django wywołuje `GET /keys/{apiKey}` i odczytuje `userID`
+
+Gdy klucz Web API jest ustawiony, endpointy `GET /api/v1/collections` i `POST /api/v1/import/doi` używają zotero.org zamiast lokalnego Zotero w Dockerze. Bez klucza — dotychczasowy fallback na Local API.
+
+Sync z kontem zotero.org pozostaje **opcjonalnym backupem** dla cytowań w Docs (wymaga lokalnego Zotero + citing protocol).
 
 ### 6. ORCID Public API — poza Zotero
 

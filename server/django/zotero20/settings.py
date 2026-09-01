@@ -98,6 +98,17 @@ LOGOUT_REDIRECT_URL = "/app/login/"
 
 # --- Zotero20 gateway ---
 ZOTERO_URL = os.environ.get("ZOTERO_URL", "http://127.0.0.1:23119").rstrip("/")
+
+# Zotero Web API (zotero.org) — opcjonalnie; gdy ustawiony, kolekcje i import DOI
+# idą bezpośrednio do biblioteki online (bez VNC / lokalnego Dockera).
+# Akceptuje też legacy nazwy sekretów GitHub: ZOTER_API_RW / ZOTERO_API_RW.
+ZOTERO_WEB_API_KEY = (
+    os.environ.get("ZOTERO_WEB_API_KEY", "").strip()
+    or os.environ.get("ZOTER_API_RW", "").strip()
+    or os.environ.get("ZOTERO_API_RW", "").strip()
+)
+# Opcjonalnie; jeśli puste, Django wywoła GET /keys/{apiKey} i odczyta userID.
+ZOTERO_WEB_USER_ID = os.environ.get("ZOTERO_WEB_USER_ID", "").strip()
 STUDIES_CONFIG = os.environ.get(
     "STUDIES_CONFIG",
     str(BASE_DIR / "config" / "studies.yaml"),

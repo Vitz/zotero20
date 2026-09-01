@@ -168,3 +168,12 @@ class ZoteroClient:
                 logger.info("Zotero not ready (attempt %s/%s)", attempt + 1, retries)
                 time.sleep(delay)
         return False
+
+
+def get_zotero_client():
+    """Zwraca klienta Web API (gdy skonfigurowany) lub lokalnego Zotero."""
+    from .zotero_web import ZoteroWebClient, web_api_configured
+
+    if web_api_configured():
+        return ZoteroWebClient(), "web"
+    return ZoteroClient(), "local"

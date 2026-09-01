@@ -90,6 +90,16 @@ jobs:
             }
             set_env ZOTERO20_API_KEY "${{ secrets.ZOTERO20_API_KEY }}"
             set_env DJANGO_SECRET_KEY "${{ secrets.DJANGO_SECRET_KEY }}"
+            ZOTERO_WEB_KEY="${{ secrets.ZOTERO_API_RW }}"
+            if [ -z "$ZOTERO_WEB_KEY" ]; then
+              ZOTERO_WEB_KEY="${{ secrets.ZOTER_API_RW }}"
+            fi
+            if [ -n "$ZOTERO_WEB_KEY" ]; then
+              set_env ZOTERO_WEB_API_KEY "$ZOTERO_WEB_KEY"
+            fi
+            if [ -n "${{ secrets.ZOTERO_WEB_USER_ID }}" ]; then
+              set_env ZOTERO_WEB_USER_ID "${{ secrets.ZOTERO_WEB_USER_ID }}"
+            fi
             set_env ZOTERO20_HOST_PORT "8089"
             set_env DJANGO_ALLOWED_HOSTS "zotero.keyweb.pl,localhost,127.0.0.1"
             set_env ZOTERO20_IMAGE_ZOTERO "${IMAGE_ZOTERO}"

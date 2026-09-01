@@ -3,40 +3,56 @@ from django.http import JsonResponse
 from apps.imports.middleware import json_api, normalize_doi, normalize_orcid, parse_json_body
 from .services.orcid import import_orcid_works
 from .services.studies import StudiesConfigError, list_studies, resolve_collection_key
-from .services.zotero import ZoteroClient, ZoteroClientError
+from .services.zotero import ZoteroClient, ZoteroClientError, get_zotero_client
+from .services.zotero_web import web_api_configured
 
 
-_COLLECTIONS_EMPTY_HINT = (
+_COLLECTIONS_EMPTY_HINT_LOCAL = (
     "Serwer używa lokalnej biblioteki Zotero (Docker), nie zotero.org. "
     "Kolekcje z konta online pojawią się dopiero po synchronizacji Zotero na serwerze "
     "albo możesz podać 8-znakowy klucz kolekcji ręcznie (z URL zotero.org, np. …/collections/FVIAD3D8/collection)."
 )
+_COLLECTIONS_EMPTY_HINT_WEB = (
+    "Konto zotero.org nie ma jeszcze kolekcji albo klucz API nie ma dostępu do biblioteki. "
+    "Utwórz kolekcję w Zotero Desktop/Web i nadaj kluczowi API uprawnienia do biblioteki."
+)
 
 
 def _zotero_collections_payload() -> dict:
-    client = ZoteroClient()
+    client, source = get_zotero_client()
     try:
         items = client.list_collections()
         payload = {
             "available": True,
+            "source": source,
             "items": items,
         }
         if not items:
             payload["empty"] = True
-            payload["hint"] = _COLLECTIONS_EMPTY_HINT
+            payload["hint"] = (
+                _COLLECTIONS_EMPTY_HINT_WEB if source == "web" else _COLLECTIONS_EMPTY_HINT_LOCAL
+            )
         return payload
     except ZoteroClientError as exc:
         return {
             "available": False,
+            "source": source,
             "error": str(exc),
         }
 
 
 @json_api
 def health(request):
-    client = ZoteroClient()
-    zotero = client.health_summary()
-    ok = "ping" in zotero and zotero["ping"] is not None
+    if web_api_configured():
+        from .services.zotero_web import ZoteroWebClient
+
+        client = ZoteroWebClient()
+        zotero = client.health_summary()
+        ok = "error" not in zotero
+    else:
+        client = ZoteroClient()
+        zotero = client.health_summary()
+        ok = "ping" in zotero and zotero["ping"] is not None
     return JsonResponse(
         {
             "status": "ok" if ok else "degraded",
@@ -59,6 +75,8 @@ def collections_list(request):
             status=502,
         )
     response = {"collections": payload["items"]}
+    if payload.get("source"):
+        response["source"] = payload["source"]
     if payload.get("hint"):
         response["hint"] = payload["hint"]
     return JsonResponse(response)
@@ -109,7 +127,7 @@ def import_doi(request):
     except StudiesConfigError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
-    client = ZoteroClient()
+    client, source = get_zotero_client()
     try:
         result = client.add_item_by_id(doi, collection_key)
     except ZoteroClientError as exc:
@@ -119,6 +137,7 @@ def import_doi(request):
         "success": True,
         "doi": doi,
         "collection_key": collection_key,
+        "source": source,
         "result": result,
     }
     if study:

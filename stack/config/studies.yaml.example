@@ -2,10 +2,13 @@
 #
 # 1. Skopiuj:  cp config/studies.yaml.example config/studies.yaml
 # 2. Utwórz kolekcje w Zotero Desktop (UI lub istniejące).
-# 3. Pobierz collection_key (8-znakowy klucz Zotero):
+# 3. Pobierz collection_key (8-znakowy klucz Zotero — NIE nazwa folderu):
 #      docker compose -p zotero20 exec zotero \
 #        curl -s http://127.0.0.1:23119/api/users/0/collections
+#    W JSON szukaj pary: "key": "ABC12XYZ" przy "name": "Badanie 1".
 #    (na hoście z Zotero: curl http://127.0.0.1:23119/api/users/0/collections)
+#    Po wdrożeniu API: curl -H "X-API-Key: $ZOTERO20_API_KEY" \
+#      http://127.0.0.1:8089/api/v1/studies  → sekcja zotero_collections
 # 4. Wklej prawdziwy klucz zamiast REPLACE_WITH_ZOTERO_COLLECTION_KEY.
 # 5. slug (np. badanie-1) wysyła sidebar/Connector — musi się zgadzać z polem "study" w API.
 #

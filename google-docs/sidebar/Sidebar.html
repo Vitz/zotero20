@@ -17,7 +17,7 @@
     #post-import p { margin: 0 0 8px; font-size: 12px; line-height: 1.4; }
     #post-import button { margin-top: 6px; }
     #post-import .hint { font-size: 11px; color: #555; margin-top: 8px; }
-    #studies-warning {
+    #setup-warning, #studies-warning {
       display: none;
       margin-top: 10px;
       padding: 8px;
@@ -27,6 +27,17 @@
       font-size: 12px;
       line-height: 1.4;
     }
+    .current-collection {
+      margin: 10px 0;
+      padding: 8px;
+      background: #e8f5e9;
+      border: 1px solid #c8e6c9;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .current-collection strong { display: block; margin-bottom: 4px; }
+    details { margin-top: 10px; font-size: 12px; }
+    details summary { cursor: pointer; font-weight: bold; }
     select:disabled, button:disabled { opacity: 0.6; cursor: not-allowed; }
     .error { color: #b00020; }
     .ok { color: #0a7a2f; }
@@ -37,27 +48,54 @@
   <p>Importuj źródła do kolekcji na serwerze. Wstawianie cytowań wymaga <strong>Zotero20 Connector</strong> (menu Zotero w Docs).</p>
 
   <div class="tabs">
+    <button type="button" onclick="showTab('settings')">Ustawienia</button>
     <button type="button" onclick="showTab('doi')">DOI</button>
     <button type="button" onclick="showTab('orcid')">ORCID</button>
     <button type="button" onclick="showTab('status')">Status</button>
   </div>
 
-  <div id="tab-doi" class="tab active">
+  <div id="tab-settings" class="tab active">
+    <p>Wybierz domyślną kolekcję Zotero <strong>raz</strong> — każdy import trafi tam automatycznie.</p>
+    <label for="default-collection">Domyślna kolekcja</label>
+    <select id="default-collection" disabled>
+      <option value="">Ładowanie kolekcji…</option>
+    </select>
+    <button id="btn-save-default" type="button" onclick="saveDefaultCollection()" disabled>Zapisz domyślną kolekcję</button>
+    <p class="hint" style="font-size:11px;color:#555;margin-top:8px;">
+      Lista pobierana na żywo z Zotero (Local API). Nie trzeba edytować <code>studies.yaml</code>.
+    </p>
+  </div>
+
+  <div id="tab-doi" class="tab">
+    <div id="current-collection-doi" class="current-collection" style="display:none;">
+      <strong>Domyślna kolekcja</strong>
+      <span id="current-collection-doi-label"></span>
+    </div>
     <label for="doi">DOI</label>
     <input id="doi" type="text" placeholder="10.1038/nature12373">
-    <label for="study-doi">Badanie</label>
-    <select id="study-doi" disabled></select>
     <button id="btn-import-doi" type="button" onclick="doImportDoi()" disabled>Importuj DOI</button>
+    <details id="advanced-doi" style="display:none;">
+      <summary>Zaawansowane: nadpisz badaniem z studies.yaml</summary>
+      <label for="study-doi">Badanie (opcjonalnie)</label>
+      <select id="study-doi" disabled></select>
+    </details>
   </div>
 
   <div id="tab-orcid" class="tab">
+    <div id="current-collection-orcid" class="current-collection" style="display:none;">
+      <strong>Domyślna kolekcja</strong>
+      <span id="current-collection-orcid-label"></span>
+    </div>
     <label for="orcid">ORCID</label>
     <input id="orcid" type="text" placeholder="0000-0002-1825-0097">
-    <label for="study-orcid">Badanie</label>
-    <select id="study-orcid" disabled></select>
     <label for="limit">Limit prac</label>
     <input id="limit" type="number" value="50" min="1" max="200">
     <button id="btn-import-orcid" type="button" onclick="doImportOrcid()" disabled>Importuj prace ORCID</button>
+    <details id="advanced-orcid" style="display:none;">
+      <summary>Zaawansowane: nadpisz badaniem z studies.yaml</summary>
+      <label for="study-orcid">Badanie (opcjonalnie)</label>
+      <select id="study-orcid" disabled></select>
+    </details>
   </div>
 
   <div id="tab-status" class="tab">
@@ -65,6 +103,7 @@
     <pre id="status-text"></pre>
   </div>
 
+  <div id="setup-warning"></div>
   <div id="studies-warning"></div>
   <div id="status"></div>
 
@@ -82,7 +121,13 @@
 
   <script>
     var lastImport = { doi: '', itemKey: '' };
-    var studiesState = { loaded: false, configured: 0 };
+    var appState = {
+      collections: [],
+      defaultCollection: { key: '', name: '' },
+      studies: [],
+      configuredStudies: 0,
+    };
+
     function showTab(name) {
       document.querySelectorAll('.tab').forEach(function (el) { el.classList.remove('active'); });
       document.getElementById('tab-' + name).classList.add('active');
@@ -99,20 +144,15 @@
       document.getElementById('post-import').style.display = 'none';
     }
 
-    function showPostImport(doi, itemKey, study) {
+    function showPostImport(doi, itemKey, collectionLabel) {
       lastImport = { doi: doi || '', itemKey: itemKey || '' };
       var summary = 'DOI: ' + doi;
-      if (study) summary += ' → ' + study;
+      if (collectionLabel) summary += '\nKolekcja: ' + collectionLabel;
       if (itemKey) summary += '\nKlucz pozycji: ' + itemKey;
       document.getElementById('post-import-summary').textContent = summary;
       document.getElementById('post-import').style.display = 'block';
     }
 
-    /**
-     * Protokół dla Zotero20 Connector (content script na docs.google.com).
-     * Connector powinien nasłuchiwać window.addEventListener('message', …)
-     * i wywołać Zotero.GoogleDocs.execCommand('addEditCitation').
-     */
     function requestCitationInsert() {
       var payload = {
         source: 'zotero20-sidebar',
@@ -136,9 +176,15 @@
       }
     }
 
-    function setImportEnabled(enabled) {
-      document.getElementById('btn-import-doi').disabled = !enabled;
-      document.getElementById('btn-import-orcid').disabled = !enabled;
+    function showSetupWarning(html) {
+      var el = document.getElementById('setup-warning');
+      if (!html) {
+        el.style.display = 'none';
+        el.innerHTML = '';
+        return;
+      }
+      el.style.display = 'block';
+      el.innerHTML = html;
     }
 
     function showStudiesWarning(html) {
@@ -152,131 +198,204 @@
       el.innerHTML = html;
     }
 
+    function setImportEnabled(enabled) {
+      document.getElementById('btn-import-doi').disabled = !enabled;
+      document.getElementById('btn-import-orcid').disabled = !enabled;
+    }
+
+    function updateCurrentCollectionLabels() {
+      var label = appState.defaultCollection.name || appState.defaultCollection.key || '';
+      var hasDefault = !!appState.defaultCollection.key;
+      ['doi', 'orcid'].forEach(function (suffix) {
+        var box = document.getElementById('current-collection-' + suffix);
+        var text = document.getElementById('current-collection-' + suffix + '-label');
+        if (hasDefault) {
+          box.style.display = 'block';
+          text.textContent = label;
+        } else {
+          box.style.display = 'none';
+        }
+      });
+      setImportEnabled(hasDefault);
+      if (!hasDefault) {
+        showSetupWarning(
+          '<strong>Ustaw domyślną kolekcję</strong> w zakładce Ustawienia — ' +
+          'bez tego import nie zadziała.'
+        );
+        showTab('settings');
+      } else {
+        showSetupWarning('');
+      }
+    }
+
+    function fillCollectionSelect(selectId, selectedKey) {
+      var sel = document.getElementById(selectId);
+      sel.innerHTML = '';
+      if (!appState.collections.length) {
+        var empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = '(brak kolekcji w Zotero)';
+        sel.appendChild(empty);
+        sel.disabled = true;
+        return;
+      }
+      var placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = '— wybierz kolekcję —';
+      placeholder.disabled = true;
+      if (!selectedKey) placeholder.selected = true;
+      sel.appendChild(placeholder);
+
+      appState.collections.forEach(function (c) {
+        var opt = document.createElement('option');
+        opt.value = c.key;
+        opt.textContent = c.name || c.key;
+        if (selectedKey && c.key === selectedKey) {
+          opt.selected = true;
+        }
+        sel.appendChild(opt);
+      });
+      sel.disabled = false;
+    }
+
     function fillStudies(studies) {
       var configured = studies.filter(function (s) { return s.configured; });
-      studiesState = { loaded: true, configured: configured.length };
+      appState.studies = studies;
+      appState.configuredStudies = configured.length;
+
+      if (!configured.length) {
+        document.getElementById('advanced-doi').style.display = 'none';
+        document.getElementById('advanced-orcid').style.display = 'none';
+        showStudiesWarning('');
+        return;
+      }
+
+      document.getElementById('advanced-doi').style.display = 'block';
+      document.getElementById('advanced-orcid').style.display = 'block';
 
       ['study-doi', 'study-orcid'].forEach(function (id) {
         var sel = document.getElementById(id);
         sel.innerHTML = '';
-
-        if (!studies.length) {
-          var empty = document.createElement('option');
-          empty.value = '';
-          empty.textContent = '(brak badań na serwerze)';
-          sel.appendChild(empty);
-          sel.disabled = true;
-          return;
-        }
-
-        var placeholder = document.createElement('option');
-        placeholder.value = '';
-        placeholder.textContent = '— wybierz badanie —';
-        placeholder.disabled = true;
-        placeholder.selected = true;
-        sel.appendChild(placeholder);
-
-        studies.forEach(function (s) {
+        var none = document.createElement('option');
+        none.value = '';
+        none.textContent = '— użyj domyślnej kolekcji —';
+        none.selected = true;
+        sel.appendChild(none);
+        configured.forEach(function (s) {
           var opt = document.createElement('option');
           opt.value = s.slug;
-          opt.textContent = s.label + (s.configured ? '' : ' (brak collection_key)');
-          if (!s.configured) {
-            opt.disabled = true;
-          }
+          opt.textContent = s.label;
           sel.appendChild(opt);
         });
-
-        sel.disabled = configured.length === 0;
-        if (configured.length === 1) {
-          sel.value = configured[0].slug;
-        }
+        sel.disabled = false;
       });
-
-      if (!studies.length) {
-        showStudiesWarning(
-          '<strong>Brak badań.</strong> Administrator musi skonfigurować ' +
-          '<code>config/studies.yaml</code> na serwerze (Mikrus: <code>~/zotero20-stack/config/studies.yaml</code>). ' +
-          'Patrz dokumentacja deploy.'
-        );
-        setImportEnabled(false);
-      } else if (!configured.length) {
-        showStudiesWarning(
-          '<strong>Żadne badanie nie ma <code>collection_key</code>.</strong> ' +
-          'Uzupełnij klucze kolekcji Zotero w <code>studies.yaml</code> na serwerze i odśwież panel.'
-        );
-        setImportEnabled(false);
-      } else {
-        showStudiesWarning('');
-        setImportEnabled(true);
-      }
     }
 
-    function loadStudies() {
-      setStatus('Ładowanie listy badań…');
-      setImportEnabled(false);
+    function loadCollections() {
       google.script.run
         .withSuccessHandler(function (data) {
-          fillStudies(data.studies || []);
-          if (studiesState.configured > 0) {
-            setStatus('Załadowano ' + studiesState.configured + ' badań.');
+          appState.collections = data.collections || [];
+          fillCollectionSelect('default-collection', appState.defaultCollection.key);
+          document.getElementById('btn-save-default').disabled = appState.collections.length === 0;
+          if (!appState.collections.length) {
+            setStatus('Brak kolekcji w Zotero — utwórz folder w Zotero Desktop.', true);
           }
         })
         .withFailureHandler(function (e) {
-          showStudiesWarning(
-            '<strong>Nie udało się pobrać badań z API.</strong> ' + e.message +
-            '<br>Sprawdź <code>ZOTERO20_API_KEY</code> w Script Properties oraz ' +
-            '<code>studies.yaml</code> na serwerze.'
-          );
+          fillCollectionSelect('default-collection', '');
+          setStatus('Błąd ładowania kolekcji: ' + e.message, true);
+        })
+        .getCollections();
+    }
+
+    function loadDefaultCollection() {
+      google.script.run
+        .withSuccessHandler(function (saved) {
+          appState.defaultCollection = saved || { key: '', name: '' };
+          fillCollectionSelect('default-collection', appState.defaultCollection.key);
+          updateCurrentCollectionLabels();
+        })
+        .withFailureHandler(function (e) {
+          setStatus('Błąd odczytu ustawień: ' + e.message, true);
+        })
+        .getDefaultCollection();
+    }
+
+    function loadStudiesOptional() {
+      google.script.run
+        .withSuccessHandler(function (data) {
+          fillStudies(data.studies || []);
+        })
+        .withFailureHandler(function () {
           fillStudies([]);
-          setStatus('Błąd ładowania badań: ' + e.message, true);
         })
         .getStudies();
     }
 
-    function requireStudy(selectId) {
-      var study = document.getElementById(selectId).value;
-      if (!study) {
-        if (!studiesState.loaded) {
-          setStatus('Poczekaj na załadowanie listy badań.', true);
-        } else if (studiesState.configured === 0) {
-          setStatus('Brak skonfigurowanych badań — uzupełnij studies.yaml na serwerze.', true);
-        } else {
-          setStatus('Wybierz badanie z listy.', true);
-        }
-        return '';
+    function saveDefaultCollection() {
+      var sel = document.getElementById('default-collection');
+      var key = sel.value;
+      var name = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : '';
+      if (!key) {
+        setStatus('Wybierz kolekcję z listy.', true);
+        return;
       }
-      return study;
+      setStatus('Zapisuję…');
+      google.script.run
+        .withSuccessHandler(function (saved) {
+          appState.defaultCollection = saved;
+          updateCurrentCollectionLabels();
+          setStatus('Zapisano domyślną kolekcję: ' + saved.name);
+        })
+        .withFailureHandler(function (e) {
+          setStatus(e.message, true);
+        })
+        .saveDefaultCollection(key, name);
+    }
+
+    function resolveImportTarget(studySelectId) {
+      var study = document.getElementById(studySelectId).value;
+      if (study) {
+        return { study: study };
+      }
+      if (!appState.defaultCollection.key) {
+        setStatus('Ustaw domyślną kolekcję w zakładce Ustawienia.', true);
+        showTab('settings');
+        return null;
+      }
+      return { collectionKey: appState.defaultCollection.key };
     }
 
     function doImportDoi() {
       var doi = document.getElementById('doi').value.trim();
-      var study = requireStudy('study-doi');
       if (!doi) { setStatus('Podaj DOI.', true); return; }
-      if (!study) { return; }
+      var target = resolveImportTarget('study-doi');
+      if (!target) return;
       hidePostImport();
       setStatus('Importuję…');
       google.script.run
         .withSuccessHandler(function (r) {
-          setStatus('Dodano DOI: ' + r.doi + ' → ' + r.study);
+          var label = appState.defaultCollection.name || r.collection_key || '';
+          setStatus('Dodano DOI: ' + r.doi + ' → ' + label);
           google.script.run
             .withSuccessHandler(function (itemKey) {
-              showPostImport(r.doi, itemKey, r.study);
+              showPostImport(r.doi, itemKey, label);
             })
             .withFailureHandler(function () {
-              showPostImport(r.doi, '', r.study);
+              showPostImport(r.doi, '', label);
             })
             .extractItemKey(r.result || r);
         })
         .withFailureHandler(function (e) { setStatus(e.message, true); })
-        .importDoi(doi, study);
+        .importDoi(doi, target);
     }
 
     function doImportOrcid() {
       var orcid = document.getElementById('orcid').value.trim();
-      var study = requireStudy('study-orcid');
       var limit = parseInt(document.getElementById('limit').value, 10) || 50;
       if (!orcid) { setStatus('Podaj ORCID.', true); return; }
-      if (!study) { return; }
+      var target = resolveImportTarget('study-orcid');
+      if (!target) return;
       setStatus('Importuję prace ORCID… (może potrwać)');
       google.script.run
         .withSuccessHandler(function (r) {
@@ -284,7 +403,7 @@
           setStatus('ORCID: dodano ' + (s.added_count || 0) + ', pominięto ' + (s.skipped_count || 0) + ', błędy ' + (s.error_count || 0));
         })
         .withFailureHandler(function (e) { setStatus(e.message, true); })
-        .importOrcid(orcid, study, limit);
+        .importOrcid(orcid, target, limit);
     }
 
     function loadStatus() {
@@ -298,7 +417,15 @@
         .getLastStatus();
     }
 
-    loadStudies();
+    function boot() {
+      setStatus('Ładowanie…');
+      loadDefaultCollection();
+      loadCollections();
+      loadStudiesOptional();
+      setStatus('Wybierz domyślną kolekcję w Ustawieniach (jednorazowo).');
+    }
+
+    boot();
   </script>
 </body>
 </html>

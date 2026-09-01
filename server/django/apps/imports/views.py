@@ -1,7 +1,13 @@
 from django.http import JsonResponse
 
 from apps.imports.middleware import json_api, normalize_doi, normalize_orcid, parse_json_body
-from .services.bibliography import DEFAULT_STYLE_ID, export_collection_bibliography, list_styles, resolve_style_id
+from .services.bibliography import (
+    DEFAULT_STYLE_ID,
+    export_collection_bibliography,
+    list_styles,
+    resolve_style_id,
+    style_label,
+)
 from .services.orcid import import_orcid_works
 from .services.studies import StudiesConfigError, list_studies, resolve_collection_key
 from .services.exceptions import ZoteroClientError
@@ -286,7 +292,28 @@ def item_detail(request, item_key):
     if request.method != "GET":
         return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
 
+    style = (request.GET.get("style") or "").strip()
     client, source = get_zotero_client()
+
+    if style:
+        try:
+            resolved_style = resolve_style_id(style)
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+        try:
+            citation_text = client.fetch_item_citation(item_key, resolved_style)
+        except ZoteroClientError as exc:
+            return JsonResponse({"error": str(exc)}, status=502)
+        return JsonResponse(
+            {
+                "source": source,
+                "item_key": item_key,
+                "style": resolved_style,
+                "style_label": style_label(resolved_style),
+                "citation_text": citation_text,
+            }
+        )
+
     try:
         item = client.get_item(item_key)
     except ZoteroClientError as exc:

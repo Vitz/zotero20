@@ -6,7 +6,8 @@ import requests
 from django.conf import settings
 
 from .doi import fetch_crossref_metadata
-from .citation import format_citation_text
+from .bibliography import resolve_style_id
+from .citation import format_citation_text, parse_citation_html
 from .exceptions import ZoteroClientError
 
 logger = logging.getLogger(__name__)
@@ -189,6 +190,34 @@ class ZoteroWebClient:
         if isinstance(entry, dict):
             return self._summarize_item(entry)
         return None
+
+    def fetch_item_citation(
+        self,
+        item_key: str,
+        style: str,
+        locale: str = "pl-PL",
+    ) -> str:
+        resolved_style = resolve_style_id(style)
+        user_id = self.resolve_user_id()
+        response = self._session.get(
+            f"{ZOTERO_WEB_API_BASE}/users/{user_id}/items/{item_key}",
+            params={"format": "citation", "style": resolved_style, "locale": locale},
+            headers={"Accept": "text/html"},
+            timeout=self.timeout,
+        )
+        if response.status_code != 200:
+            raise ZoteroClientError(
+                f"Web API citation export failed: HTTP {response.status_code} — "
+                f"{response.text[:500]}",
+                response.status_code,
+            )
+        text = parse_citation_html(response.text)
+        if text:
+            return text
+        item = self.get_item(item_key)
+        if item:
+            return item.get("citation_text") or format_citation_text(item)
+        return "(?)"
 
     def _summarize_item(self, entry: dict) -> dict:
         data = entry.get("data") or {}

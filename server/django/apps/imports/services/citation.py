@@ -1,3 +1,16 @@
+import html
+import re
+
+
+def parse_citation_html(citation_html: str) -> str:
+    """Wyciąga tekst cytowania z odpowiedzi Zotero format=citation (HTML)."""
+    if not citation_html or not citation_html.strip():
+        return ""
+    text = re.sub(r"<[^>]+>", "", citation_html)
+    text = html.unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def format_citation_text(data: dict) -> str:
     """Prosty tekst cytowania (autor, rok) do wstawienia zamiast placeholdera."""
     creators = data.get("creators") or []

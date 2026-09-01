@@ -8,6 +8,8 @@ const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
 const NAMED_RANGE_BIBLIOGRAPHY = 'ZOTERO20_BIBLIOGRAPHY';
+const NAMED_RANGE_CITE_PREFIX = 'ZOTERO20_CITE_';
+const PROP_CITATION_RANGES = 'ZOTERO20_CITATION_RANGES';
 const BIBLIOGRAPHY_HEADING = 'Bibliografia';
 
 function onOpen() {
@@ -75,7 +77,7 @@ function importDoi(doi, options) {
   }
   if (citationText && !result.duplicate) {
     try {
-      replacePlaceholderInDocument_(citationText, buildIdentifiers_('doi', result.doi || doi));
+      replacePlaceholderInDocument_(citationText, buildIdentifiers_('doi', result.doi || doi), itemKey);
       result.placeholder_replaced = true;
     } catch (e) {
       result.placeholder_error = e.message;
@@ -125,6 +127,61 @@ function saveBibliographyStyle(styleId) {
   }
   PropertiesService.getScriptProperties().setProperty(PROP_BIBLIOGRAPHY_STYLE, styleId);
   return getBibliographyStyle();
+}
+
+function refreshInTextCitations() {
+  return refreshInTextCitations_();
+}
+
+function refreshInTextCitations_() {
+  var style = getBibliographyStyle();
+  var doc = DocumentApp.getActiveDocument();
+  var entries = loadCitationRanges_();
+  if (!entries.length) {
+    return {
+      updated: 0,
+      skipped: 0,
+      errors: [],
+      style: style,
+      message: 'Brak śledzonych cytowań w dokumencie (wstaw przez [*] z panelu).',
+    };
+  }
+
+  var updated = 0;
+  var skipped = 0;
+  var errors = [];
+  var stillValid = [];
+
+  for (var i = 0; i < entries.length; i++) {
+    var entry = entries[i];
+    var named = doc.getNamedRanges(entry.name);
+    if (!named || !named.length) {
+      skipped++;
+      continue;
+    }
+
+    try {
+      var newText = getItemCitationText(entry.item_key, style);
+      if (updateCitationNamedRange_(named[0], entry.name, newText)) {
+        updated++;
+        stillValid.push(entry);
+      } else {
+        skipped++;
+      }
+    } catch (e) {
+      errors.push(entry.item_key + ': ' + (e.message || String(e)));
+      stillValid.push(entry);
+    }
+  }
+
+  saveCitationRanges_(stillValid);
+
+  return {
+    updated: updated,
+    skipped: skipped,
+    errors: errors,
+    style: style,
+  };
 }
 
 function insertBibliography() {
@@ -178,7 +235,7 @@ function writeBibliographyToDocument_(entries, styleLabel, isRefresh) {
     body.appendParagraph(String(entries[i]));
   }
 
-  var rangeBuilder = body.newRange();
+  var rangeBuilder = doc.newRange();
   for (var j = startIdx; j < body.getNumChildren(); j++) {
     var child = body.getChild(j);
     if (child.getType() !== DocumentApp.ElementType.PARAGRAPH) {
@@ -236,12 +293,19 @@ function removeBibliographySection_(doc, body) {
   return indices.length > 0;
 }
 
-function getItemCitationText(itemKey) {
+function getItemCitationText(itemKey, style) {
   var key = String(itemKey || '').trim();
   if (!key) {
     throw new Error('Brak klucza pozycji.');
   }
-  var data = apiGet('/items/' + encodeURIComponent(key));
+  var path = '/items/' + encodeURIComponent(key);
+  if (style) {
+    path += '?style=' + encodeURIComponent(style);
+  }
+  var data = apiGet(path);
+  if (data.citation_text) {
+    return data.citation_text;
+  }
   if (data.item && data.item.citation_text) {
     return data.item.citation_text;
   }
@@ -262,8 +326,8 @@ function pasteCitationForItem(itemKey, identifiers) {
   if (!citationText) {
     throw new Error('Brak tekstu cytowania dla pozycji ' + key + '.');
   }
-  replacePlaceholderInDocument_(citationText, identifiers || {});
-  return { replaced: true, citation_text: citationText, item_key: key };
+  replacePlaceholderInDocument_(citationText, identifiers || {}, key);
+  return { replaced: true, citation_text: citationText, item_key: key, tracked: true };
 }
 
 /** Widoczny komunikat w dokumencie (modal) — wywoływany z sidebara po wklejeniu. */
@@ -274,16 +338,21 @@ function showPasteAlert(message, isError) {
 
 /**
  * Zamienia pierwszy placeholder w dokumencie na podany tekst.
+ * Gdy podano itemKey, cytowanie jest śledzone (NamedRange) do odświeżania stylu.
  * Kolejność: [*], potem [identyfikator] dopasowany do importu.
  */
-function replacePlaceholderInDocument_(text, identifiers) {
+function replacePlaceholderInDocument_(text, identifiers, itemKey) {
   identifiers = identifiers || {};
   var body = DocumentApp.getActiveDocument().getBody();
   var patterns = buildPlaceholderPatterns_(identifiers);
 
   for (var i = 0; i < patterns.length; i++) {
-    if (replaceFirstLiteral_(body, patterns[i], text)) {
-      return { pattern: patterns[i], text: text };
+    var result = replaceFirstLiteral_(body, patterns[i], text);
+    if (result) {
+      if (itemKey) {
+        registerTrackedCitation_(result.textElement, result.start, result.end, itemKey);
+      }
+      return { pattern: patterns[i], text: text, item_key: itemKey || '' };
     }
   }
 
@@ -344,6 +413,84 @@ function replaceFirstLiteral_(element, searchText, replacementText) {
   var end = found.getEndOffsetInclusive();
   textElement.deleteText(start, end);
   textElement.insertText(start, replacementText);
+  return {
+    textElement: textElement,
+    start: start,
+    end: start + replacementText.length - 1,
+  };
+}
+
+function registerTrackedCitation_(textElement, start, end, itemKey) {
+  var doc = DocumentApp.getActiveDocument();
+  var rangeName = allocateCitationRangeName_(doc, itemKey);
+  var rangeBuilder = doc.newRange();
+  rangeBuilder.addElement(textElement, start, end);
+  doc.addNamedRange(rangeName, rangeBuilder.build());
+  rememberCitationRange_(rangeName, itemKey);
+}
+
+function allocateCitationRangeName_(doc, itemKey) {
+  var base = NAMED_RANGE_CITE_PREFIX + String(itemKey).trim();
+  if (!doc.getNamedRanges(base).length) {
+    return base;
+  }
+  var n = 2;
+  while (doc.getNamedRanges(base + '_' + n).length) {
+    n++;
+  }
+  return base + '_' + n;
+}
+
+function rememberCitationRange_(rangeName, itemKey) {
+  var entries = loadCitationRanges_();
+  var filtered = entries.filter(function (e) { return e.name !== rangeName; });
+  filtered.push({
+    name: rangeName,
+    item_key: String(itemKey || '').trim(),
+    at: new Date().toISOString(),
+  });
+  saveCitationRanges_(filtered);
+}
+
+function loadCitationRanges_() {
+  var raw = PropertiesService.getDocumentProperties().getProperty(PROP_CITATION_RANGES) || '[]';
+  try {
+    var entries = JSON.parse(raw);
+    return Array.isArray(entries) ? entries : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveCitationRanges_(entries) {
+  PropertiesService.getDocumentProperties().setProperty(
+    PROP_CITATION_RANGES,
+    JSON.stringify(entries || [])
+  );
+}
+
+function updateCitationNamedRange_(namedRange, rangeName, newText) {
+  var range = namedRange.getRange();
+  var elements = range.getRangeElements();
+  if (!elements.length) {
+    return false;
+  }
+
+  var doc = DocumentApp.getActiveDocument();
+  var textElement = elements[0].getElement().asText();
+  var start = elements[0].getStartOffset();
+  var end = elements[elements.length - 1].getEndOffsetInclusive();
+
+  textElement.deleteText(start, end);
+  textElement.insertText(start, newText);
+
+  namedRange.remove();
+
+  var rangeBuilder = doc.newRange();
+  var newEnd = start + newText.length - 1;
+  rangeBuilder.addElement(textElement, start, newEnd);
+  doc.addNamedRange(rangeName, rangeBuilder.build());
+
   return true;
 }
 

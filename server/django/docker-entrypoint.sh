@@ -10,4 +10,12 @@ if [ ! -f /app/config/studies.yaml ]; then
   fi
 fi
 
+if [ "$1" = "gunicorn" ]; then
+  shift
+  exec gunicorn zotero20.wsgi:application \
+    --bind "0.0.0.0:8000" \
+    --workers "${GUNICORN_WORKERS:-1}" \
+    --timeout "${GUNICORN_TIMEOUT:-120}"
+fi
+
 exec "$@"

@@ -39,6 +39,28 @@ if [ -n "$COLLECTIONS_JSON" ]; then
   echo "== collections =="
   echo "$COLLECTIONS_JSON"
 fi
+
+if [ "${SMOKE_TEST_DOI_IMPORT:-0}" = "1" ]; then
+  COLL_KEY="${SMOKE_TEST_COLLECTION_KEY:-}"
+  if [ -z "$COLL_KEY" ] && command -v python3 >/dev/null; then
+    COLL_KEY=$(echo "$COLLECTIONS_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['collections'][0]['key'] if d.get('collections') else '')" 2>/dev/null || true)
+  fi
+  if [ -n "$COLL_KEY" ]; then
+    echo "== import/doi smoke (collection_key=$COLL_KEY) =="
+    IMPORT_JSON=$(curl -sS -w "\nHTTP_CODE:%{http_code}" "${HDR[@]}" \
+      -H "Content-Type: application/json" \
+      -d "{\"doi\":\"10.1038/nature12373\",\"collection_key\":\"$COLL_KEY\"}" \
+      "$BASE/api/v1/import/doi")
+    echo "$IMPORT_JSON"
+    if ! echo "$IMPORT_JSON" | grep -q 'HTTP_CODE:200'; then
+      echo "BŁĄD: import/doi nie zwrócił HTTP 200"
+      exit 1
+    fi
+    echo "import/doi OK"
+  else
+    echo "Pominięto import/doi — brak collection_key"
+  fi
+fi
 echo
 
 echo "OK"

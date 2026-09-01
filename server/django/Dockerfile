@@ -22,4 +22,5 @@ COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN sed -i 's/\r$//' /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["gunicorn", "zotero20.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120"]
+# 1 worker domyślnie (Mikrus 1.2GB RAM); nadpisz GUNICORN_WORKERS w .env
+CMD ["gunicorn"]

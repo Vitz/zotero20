@@ -111,7 +111,11 @@ class ZoteroWebClient:
     def add_item_by_id(self, identifier: str, collection_key: str) -> dict:
         """Import DOI (lub innego identyfikatora) do kolekcji przez Web API."""
         doi = identifier.strip()
-        metadata = fetch_crossref_metadata(doi)
+        try:
+            metadata = fetch_crossref_metadata(doi)
+        except requests.RequestException as exc:
+            raise ZoteroClientError(f"Crossref metadata failed: {exc}") from exc
+
         item = {
             "itemType": metadata.get("itemType", "journalArticle"),
             "title": metadata.get("title", doi),
@@ -123,6 +127,8 @@ class ZoteroWebClient:
             "pages": metadata.get("pages", ""),
             "date": metadata.get("date", ""),
             "ISSN": metadata.get("ISSN", ""),
+            # Kolekcja ustawiana przy tworzeniu — Web API nie obsługuje POST …/collections/…/items.
+            "collections": [collection_key],
         }
         item = {k: v for k, v in item.items() if v}
 
@@ -146,22 +152,10 @@ class ZoteroWebClient:
                 create_response.status_code,
             )
 
-        add_response = self._session.post(
-            f"{ZOTERO_WEB_API_BASE}/users/{user_id}/collections/{collection_key}/items",
-            json={"itemKeys": [item_key]},
-            timeout=self.timeout,
-        )
-        if add_response.status_code not in (200, 201, 204):
-            raise ZoteroClientError(
-                f"Web API add to collection failed: HTTP {add_response.status_code} — "
-                f"{add_response.text[:500]}",
-                add_response.status_code,
-            )
-
         try:
-            add_body = add_response.json() if add_response.text else {}
+            create_body = create_response.json() if create_response.text else {}
         except ValueError:
-            add_body = {"raw": add_response.text}
+            create_body = {"raw": create_response.text}
 
         return {
             "success": True,
@@ -169,7 +163,7 @@ class ZoteroWebClient:
             "key": item_key,
             "itemKey": item_key,
             "collection_key": collection_key,
-            "result": add_body,
+            "result": create_body,
         }
 
     def _extract_created_item_key(self, response: requests.Response) -> str:

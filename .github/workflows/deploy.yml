@@ -119,5 +119,6 @@ jobs:
             set -euo pipefail
             export ZOTERO_BASE=http://127.0.0.1:8089
             export ZOTERO20_API_KEY="${{ secrets.ZOTERO20_API_KEY }}"
+            export SMOKE_TEST_DOI_IMPORT=1
             cd "${{ vars.DEPLOY_PATH }}/stack"
             ./scripts/test-api.sh

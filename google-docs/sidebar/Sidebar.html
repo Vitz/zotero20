@@ -175,11 +175,15 @@
       <strong>Domyślna kolekcja</strong>
       <span id="current-collection-biblio-label"></span>
     </div>
-    <p>Generuje listę literatury z domyślnej kolekcji na końcu dokumentu (jak Zotero → Wstaw bibliografię).</p>
+    <p>Generuje listę literatury na końcu dokumentu. Domyślnie tylko pozycje cytowane w tekście (jak Zotero Connector).</p>
     <label for="biblio-style">Styl cytowań (CSL)</label>
     <select id="biblio-style" disabled>
       <option value="">Ładowanie stylów…</option>
     </select>
+    <label style="display:flex;align-items:center;gap:6px;margin:10px 0 8px;font-size:12px;">
+      <input id="biblio-cited-only" type="checkbox" checked>
+      Tylko cytowane w dokumencie
+    </label>
     <button id="btn-insert-biblio" type="button" onclick="doInsertBibliography()" disabled>Wstaw literaturę</button>
     <button id="btn-refresh-biblio" type="button" onclick="doRefreshBibliography()" disabled>Odśwież bibliografię</button>
     <button id="btn-refresh-citations" type="button" onclick="doRefreshInTextCitations()" disabled>Odśwież cytowania w tekście</button>
@@ -190,7 +194,7 @@
     </p>
     <p class="hint" style="font-size:11px;color:#555;margin-top:6px;">
       „Odśwież bibliografię” zastępuje istniejącą sekcję (nagłówek <strong>Bibliografia</strong> + wpisy).
-      Zmiana stylu wymaga odświeżenia. Limit: do 150 pozycji (Zotero API).
+      Zmiana stylu wymaga odświeżenia. Tryb „cała kolekcja”: do 150 pozycji (Zotero API).
     </p>
   </div>
 
@@ -236,6 +240,7 @@
       configuredStudies: 0,
       bibliographyStyles: [],
       bibliographyStyle: 'apa',
+      bibliographyCitedOnly: true,
     };
 
     function updateCollectionsSourceHint(source) {
@@ -539,6 +544,37 @@
       };
     }
 
+    function loadBibliographyCitedOnly() {
+      var cb = document.getElementById('biblio-cited-only');
+      if (!cb) return;
+      google.script.run
+        .withSuccessHandler(function (enabled) {
+          appState.bibliographyCitedOnly = enabled !== false;
+          cb.checked = appState.bibliographyCitedOnly;
+        })
+        .withFailureHandler(function () {
+          cb.checked = appState.bibliographyCitedOnly;
+        })
+        .getBibliographyCitedOnly();
+      cb.onchange = function () {
+        appState.bibliographyCitedOnly = !!cb.checked;
+        google.script.run
+          .withFailureHandler(function () {})
+          .saveBibliographyCitedOnly(appState.bibliographyCitedOnly);
+      };
+    }
+
+    function getBibliographyCitedOnlyOption() {
+      var cb = document.getElementById('biblio-cited-only');
+      return cb ? !!cb.checked : appState.bibliographyCitedOnly;
+    }
+
+    function bibliographySuccessMessage(r, actionLabel) {
+      var count = r.item_count || 0;
+      var scope = r.cited_only ? 'cytowanych pozycji' : 'pozycji z kolekcji';
+      return actionLabel + ' bibliografię (' + count + ' ' + scope + ', ' + (r.style_label || '') + ').';
+    }
+
     function loadBibliographyStyles() {
       google.script.run
         .withSuccessHandler(function (data) {
@@ -580,12 +616,13 @@
       }
       var styleId = document.getElementById('biblio-style').value;
       if (styleId) persistBibliographyStyle(styleId);
+      var citedOnly = getBibliographyCitedOnlyOption();
       setBibliographyButtonsDisabled(true);
-      setStatus('Generuję bibliografię…');
+      setStatus(citedOnly ? 'Generuję bibliografię cytowanych pozycji…' : 'Generuję bibliografię całej kolekcji…');
       google.script.run
         .withSuccessHandler(function (r) {
           setBibliographyButtonsDisabled(false);
-          var msg = 'Wstawiono bibliografię (' + (r.item_count || 0) + ' pozycji, ' + (r.style_label || '') + ').';
+          var msg = bibliographySuccessMessage(r, 'Wstawiono');
           setStatus(msg, false);
           google.script.run.showPasteAlert(msg, false);
         })
@@ -595,7 +632,7 @@
           setStatus(msg, true);
           google.script.run.showPasteAlert(msg, true);
         })
-        .insertBibliography();
+        .insertBibliography(citedOnly);
     }
 
     function doRefreshInTextCitations(silent) {
@@ -640,12 +677,13 @@
       }
       var styleId = document.getElementById('biblio-style').value;
       if (styleId) persistBibliographyStyle(styleId);
+      var citedOnly = getBibliographyCitedOnlyOption();
       setBibliographyButtonsDisabled(true);
-      setStatus('Odświeżam bibliografię…');
+      setStatus(citedOnly ? 'Odświeżam bibliografię cytowanych pozycji…' : 'Odświeżam bibliografię całej kolekcji…');
       google.script.run
         .withSuccessHandler(function (r) {
           setBibliographyButtonsDisabled(false);
-          var msg = 'Odświeżono bibliografię (' + (r.item_count || 0) + ' pozycji, ' + (r.style_label || '') + ').';
+          var msg = bibliographySuccessMessage(r, 'Odświeżono');
           setStatus(msg, false);
           google.script.run.showPasteAlert(msg, false);
         })
@@ -655,7 +693,7 @@
           setStatus(msg, true);
           google.script.run.showPasteAlert(msg, true);
         })
-        .refreshBibliography();
+        .refreshBibliography(citedOnly);
     }
 
     function setBibliographyButtonsDisabled(disabled) {
@@ -963,6 +1001,7 @@
       loadCollections();
       loadStudiesOptional();
       loadBibliographyStyles();
+      loadBibliographyCitedOnly();
       loadStudyOverview();
       setStatus('Wybierz domyślną kolekcję w Ustawieniach (jednorazowo).');
     }

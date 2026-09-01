@@ -7,6 +7,7 @@ const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
+const PROP_BIBLIOGRAPHY_CITED_ONLY = 'ZOTERO20_BIBLIOGRAPHY_CITED_ONLY';
 const NAMED_RANGE_BIBLIOGRAPHY = 'ZOTERO20_BIBLIOGRAPHY';
 const NAMED_RANGE_CITE_PREFIX = 'ZOTERO20_CITE_';
 const PROP_CITATION_RANGES = 'ZOTERO20_CITATION_RANGES';
@@ -129,6 +130,22 @@ function saveBibliographyStyle(styleId) {
   return getBibliographyStyle();
 }
 
+function getBibliographyCitedOnly() {
+  var val = PropertiesService.getDocumentProperties().getProperty(PROP_BIBLIOGRAPHY_CITED_ONLY);
+  if (val === null || val === undefined || val === '') {
+    return true;
+  }
+  return val === 'true';
+}
+
+function saveBibliographyCitedOnly(enabled) {
+  PropertiesService.getDocumentProperties().setProperty(
+    PROP_BIBLIOGRAPHY_CITED_ONLY,
+    enabled ? 'true' : 'false'
+  );
+  return getBibliographyCitedOnly();
+}
+
 function refreshInTextCitations() {
   return refreshInTextCitations_();
 }
@@ -184,24 +201,43 @@ function refreshInTextCitations_() {
   };
 }
 
-function insertBibliography() {
-  return upsertBibliography_(false);
+function insertBibliography(citedOnly) {
+  return upsertBibliography_(false, citedOnly);
 }
 
-function refreshBibliography() {
-  return upsertBibliography_(true);
+function refreshBibliography(citedOnly) {
+  return upsertBibliography_(true, citedOnly);
 }
 
-function upsertBibliography_(isRefresh) {
+function upsertBibliography_(isRefresh, citedOnly) {
+  if (citedOnly === undefined || citedOnly === null) {
+    citedOnly = getBibliographyCitedOnly();
+  } else {
+    citedOnly = !!citedOnly;
+  }
+
   var collection = getDefaultCollection();
   if (!collection.key) {
     throw new Error('Ustaw domyślną kolekcję w zakładce Ustawienia.');
   }
   var style = getBibliographyStyle();
-  var data = apiPost('/bibliography', {
-    collection_key: collection.key,
-    style: style,
-  });
+  var payload = { style: style };
+  var citedKeys = [];
+
+  if (citedOnly) {
+    citedKeys = collectCitedItemKeysInDocumentOrder_();
+    if (!citedKeys.length) {
+      throw new Error(
+        'Brak śledzonych cytowań w dokumencie — wstaw cytowania przez [*] (import DOI → „Wklej zamiast [*]”) ' +
+        'lub odznacz „Tylko cytowane w dokumencie”, aby wstawić całą kolekcję.'
+      );
+    }
+    payload.item_keys = citedKeys;
+  } else {
+    payload.collection_key = collection.key;
+  }
+
+  var data = apiPost('/bibliography', payload);
   var entries = (data.entries || [])
     .map(function (e) { return String(e).trim(); })
     .filter(function (e) { return e; });
@@ -217,6 +253,8 @@ function upsertBibliography_(isRefresh) {
   result.style = data.style || style;
   result.style_label = data.style_label || style;
   result.item_count = data.item_count || entries.length;
+  result.cited_only = citedOnly;
+  result.cited_count = citedKeys.length || (data.item_keys && data.item_keys.length) || 0;
   return result;
 }
 
@@ -465,6 +503,82 @@ function loadCitationRanges_() {
   } catch (e) {
     return [];
   }
+}
+
+/**
+ * Zbiera unikalne item_key cytowań w kolejności pierwszego wystąpienia w dokumencie.
+ * Źródło: rejestr PROP_CITATION_RANGES + NamedRanges ZOTERO20_CITE_* (tylko istniejące).
+ */
+function collectCitedItemKeysInDocumentOrder_() {
+  var doc = DocumentApp.getActiveDocument();
+  var entries = loadCitationRanges_();
+  var withPosition = [];
+
+  for (var i = 0; i < entries.length; i++) {
+    var entry = entries[i];
+    var itemKey = String(entry.item_key || '').trim();
+    if (!itemKey) {
+      continue;
+    }
+    var named = doc.getNamedRanges(entry.name);
+    if (!named || !named.length) {
+      continue;
+    }
+    var pos = getNamedRangeDocumentPosition_(doc, named[0]);
+    withPosition.push({
+      item_key: itemKey,
+      para: pos.para,
+      offset: pos.offset,
+    });
+  }
+
+  withPosition.sort(function (a, b) {
+    if (a.para !== b.para) {
+      return a.para - b.para;
+    }
+    return a.offset - b.offset;
+  });
+
+  var seen = {};
+  var keys = [];
+  for (var j = 0; j < withPosition.length; j++) {
+    var key = withPosition[j].item_key;
+    if (!key || seen[key]) {
+      continue;
+    }
+    seen[key] = true;
+    keys.push(key);
+  }
+  return keys;
+}
+
+function getNamedRangeDocumentPosition_(doc, namedRange) {
+  var range = namedRange.getRange();
+  var elements = range.getRangeElements();
+  if (!elements.length) {
+    return { para: 2147483647, offset: 2147483647 };
+  }
+
+  var body = doc.getBody();
+  var textEl = elements[0].getElement();
+  var para = textEl.getParent();
+  while (para && para.getType && para.getType() !== DocumentApp.ElementType.PARAGRAPH) {
+    para = para.getParent ? para.getParent() : null;
+  }
+
+  var paraIdx = 2147483647;
+  if (para && para.getType && para.getType() === DocumentApp.ElementType.PARAGRAPH) {
+    try {
+      paraIdx = body.getChildIndex(para);
+    } catch (e) {
+      paraIdx = 2147483647;
+    }
+  }
+
+  return {
+    para: paraIdx,
+    offset: elements[0].getStartOffset(),
+  };
 }
 
 function saveCitationRanges_(entries) {

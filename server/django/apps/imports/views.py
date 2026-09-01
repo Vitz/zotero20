@@ -4,6 +4,7 @@ from apps.imports.middleware import json_api, normalize_doi, normalize_orcid, pa
 from .services.bibliography import (
     DEFAULT_STYLE_ID,
     export_collection_bibliography,
+    export_items_bibliography,
     list_styles,
     resolve_style_id,
     style_label,
@@ -269,14 +270,38 @@ def bibliography_generate(request):
     if body is None:
         return JsonResponse({"error": "Nieprawidłowy JSON."}, status=400)
 
-    collection_key = (body.get("collection_key") or "").strip()
-    if not collection_key:
-        return JsonResponse({"error": "Wymagane pole: collection_key."}, status=400)
-
     try:
         style = resolve_style_id(body.get("style"))
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
+
+    raw_item_keys = body.get("item_keys")
+    if raw_item_keys is not None:
+        if not isinstance(raw_item_keys, list):
+            return JsonResponse({"error": "Pole item_keys musi być tablicą."}, status=400)
+        item_keys = [str(key).strip() for key in raw_item_keys if str(key).strip()]
+        if not item_keys:
+            return JsonResponse({"error": "Wymagana niepusta lista item_keys."}, status=400)
+        if len(item_keys) > 150:
+            return JsonResponse(
+                {"error": "Maksymalnie 150 pozycji w jednym żądaniu bibliografii."},
+                status=400,
+            )
+        client, source = get_zotero_client()
+        try:
+            payload = export_items_bibliography(client, source, item_keys, style)
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+        except ZoteroClientError as exc:
+            return JsonResponse({"error": str(exc)}, status=502)
+        return JsonResponse(payload)
+
+    collection_key = (body.get("collection_key") or "").strip()
+    if not collection_key:
+        return JsonResponse(
+            {"error": "Wymagane pole: collection_key lub item_keys."},
+            status=400,
+        )
 
     client, source = get_zotero_client()
     try:

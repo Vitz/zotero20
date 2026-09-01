@@ -95,6 +95,46 @@ def parse_bib_html(bib_html: str) -> list[str]:
     return [line.strip() for line in plain.splitlines() if line.strip()]
 
 
+def export_items_bibliography(client, source: str, item_keys: list[str], style_id: str) -> dict:
+    """Pobiera sformatowaną bibliografię wybranych pozycji (kolejność = kolejność item_keys)."""
+    resolved_style = resolve_style_id(style_id)
+    normalized_keys = [key.strip() for key in item_keys if str(key).strip()]
+    if not normalized_keys:
+        raise ValueError("Wymagana niepusta lista item_keys.")
+
+    entries: list[str] = []
+    missing_keys: list[str] = []
+    for item_key in normalized_keys:
+        try:
+            bib_html = client.fetch_item_bibliography(item_key, resolved_style)
+        except ZoteroClientError:
+            missing_keys.append(item_key)
+            continue
+        parsed = [entry for entry in parse_bib_html(bib_html) if entry.strip()]
+        if parsed:
+            entries.append(parsed[0])
+        else:
+            missing_keys.append(item_key)
+
+    if not entries:
+        raise ZoteroClientError(
+            "Nie udało się sformatować bibliografii dla podanych pozycji "
+            f"(styl {resolved_style})."
+        )
+
+    payload = {
+        "source": source,
+        "style": resolved_style,
+        "style_label": style_label(resolved_style),
+        "item_count": len(entries),
+        "item_keys": normalized_keys,
+        "entries": entries,
+    }
+    if missing_keys:
+        payload["missing_item_keys"] = missing_keys
+    return payload
+
+
 def export_collection_bibliography(client, source: str, collection_key: str, style_id: str) -> dict:
     """Pobiera sformatowaną bibliografię kolekcji przez Zotero API (format=bib)."""
     resolved_style = resolve_style_id(style_id)

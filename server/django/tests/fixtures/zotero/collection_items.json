@@ -1,0 +1,38 @@
+[
+  {
+    "key": "ITEMKEY1",
+    "version": 1,
+    "data": {
+      "itemType": "journalArticle",
+      "title": "Test Article About Nature",
+      "DOI": "10.1038/nature12373",
+      "date": "2013-08-14",
+      "creators": [
+        {
+          "creatorType": "author",
+          "lastName": "Smith",
+          "firstName": "John"
+        }
+      ],
+      "collections": ["ABCD1234"]
+    }
+  },
+  {
+    "key": "ITEMKEY2",
+    "version": 1,
+    "data": {
+      "itemType": "journalArticle",
+      "title": "Second Test Article",
+      "DOI": "10.1000/xyz123",
+      "date": "2020",
+      "creators": [
+        {
+          "creatorType": "author",
+          "lastName": "Kowalski",
+          "firstName": "Anna"
+        }
+      ],
+      "collections": ["ABCD1234"]
+    }
+  }
+]

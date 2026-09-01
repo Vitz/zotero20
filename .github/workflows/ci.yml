@@ -34,6 +34,29 @@ jobs:
           ZOTERO20_API_KEY: ci-test-api-key
         run: python manage.py check
 
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: pytest (unit, mock Zotero)
+        env:
+          DJANGO_SECRET_KEY: ci-test-key
+          DJANGO_DEBUG: "true"
+          ZOTERO20_API_KEY: ci-test-api-key
+          ZOTERO_WEB_API_KEY: ""
+        run: python -m pytest tests/ -m "not integration" -q
+
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run pytest (Zotero mocks)
+        env:
+          DJANGO_SECRET_KEY: ci-test-key
+          DJANGO_DEBUG: "true"
+          ZOTERO20_API_KEY: ci-test-api-key
+          ZOTERO_URL: http://127.0.0.1:23119
+          ZOTERO_WEB_API_KEY: ""
+        run: pytest -v --tb=short
+
   dockerfile-lint:
     runs-on: ubuntu-latest
     steps:

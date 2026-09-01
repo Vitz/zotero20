@@ -1,0 +1,20 @@
+[
+  {
+    "key": "ABCD1234",
+    "version": 1,
+    "data": {
+      "key": "ABCD1234",
+      "name": "Test Collection",
+      "parentCollection": false
+    }
+  },
+  {
+    "key": "EFGH5678",
+    "version": 1,
+    "data": {
+      "key": "EFGH5678",
+      "name": "Another Collection",
+      "parentCollection": false
+    }
+  }
+]

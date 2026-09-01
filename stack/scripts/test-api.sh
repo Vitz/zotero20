@@ -43,6 +43,14 @@ echo "== health =="
 curl -sS "$BASE/api/v1/health"
 echo
 
+echo "== styles =="
+STYLES_JSON=$(curl -sS "${HDR[@]}" "$BASE/api/v1/styles")
+echo "$STYLES_JSON"
+if ! echo "$STYLES_JSON" | grep -q '"apa"'; then
+  echo "BŁĄD: /api/v1/styles nie zawiera stylu apa"
+  exit 1
+fi
+
 echo "== admin static (CSS) =="
 curl -sS -f -o /dev/null -w "HTTP %{http_code}\n" "$BASE/static/admin/css/base.css"
 
@@ -72,6 +80,26 @@ if [ -n "$COLLECTIONS_JSON" ]; then
     if [ "${REQUIRE_WEB_API:-0}" = "1" ]; then
       echo "BŁĄD: wymagany source=web (ustaw REQUIRE_WEB_API=0 aby pominąć)"
       exit 1
+    fi
+  fi
+fi
+
+if [ "${SMOKE_TEST_BIBLIOGRAPHY:-1}" != "0" ] && [ -n "$COLLECTIONS_JSON" ]; then
+  COLL_KEY="${SMOKE_TEST_COLLECTION_KEY:-}"
+  if [ -z "$COLL_KEY" ] && command -v python3 >/dev/null; then
+    COLL_KEY=$(echo "$COLLECTIONS_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['collections'][0]['key'] if d.get('collections') else '')" 2>/dev/null || true)
+  fi
+  if [ -n "$COLL_KEY" ]; then
+    echo "== bibliography smoke (collection_key=$COLL_KEY) =="
+    BIB_JSON=$(curl -sS -w "\nHTTP_CODE:%{http_code}" "${HDR[@]}" \
+      -H "Content-Type: application/json" \
+      -d "{\"collection_key\":\"$COLL_KEY\",\"style\":\"apa\"}" \
+      "$BASE/api/v1/bibliography")
+    echo "$BIB_JSON"
+    if ! echo "$BIB_JSON" | grep -q 'HTTP_CODE:200'; then
+      echo "UWAGA: bibliography collection zwrócił != 200 (może pusta kolekcja)"
+    else
+      echo "bibliography OK"
     fi
   fi
 fi

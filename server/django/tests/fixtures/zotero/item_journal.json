@@ -1,0 +1,18 @@
+{
+  "key": "ITEMKEY1",
+  "version": 1,
+  "data": {
+    "itemType": "journalArticle",
+    "title": "Test Article About Nature",
+    "DOI": "10.1038/nature12373",
+    "date": "2013-08-14",
+    "creators": [
+      {
+        "creatorType": "author",
+        "lastName": "Smith",
+        "firstName": "John"
+      }
+    ],
+    "collections": ["ABCD1234"]
+  }
+}

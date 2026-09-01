@@ -15,7 +15,13 @@ fi
 HDR=(-H "X-API-Key: $API_KEY")
 
 echo "== ping ${BASE}/connector/ping =="
-curl -sS -f "${HDR[@]}" "$BASE/connector/ping"
+PING_HEADERS=$(curl -sS -D - -o /tmp/zotero20-ping.json "${HDR[@]}" "$BASE/connector/ping" 2>&1 | head -20)
+echo "$PING_HEADERS"
+if ! echo "$PING_HEADERS" | grep -qi 'X-Zotero-Version:'; then
+  echo "BŁĄD: /connector/ping bez nagłówka X-Zotero-Version — Connector pokaże „Zotero is offline”"
+  exit 1
+fi
+cat /tmp/zotero20-ping.json
 echo
 
 echo "== health =="

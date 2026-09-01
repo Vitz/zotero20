@@ -112,6 +112,39 @@ class ZoteroClient:
 
         return {"success": True, "via": "local_api", "result": body}
 
+    def list_collections(self) -> list[dict]:
+        response = self._request("GET", "/api/users/0/collections")
+        if response.status_code != 200:
+            raise ZoteroClientError(
+                f"list collections failed: HTTP {response.status_code} — {response.text[:500]}",
+                response.status_code,
+            )
+        try:
+            raw = response.json()
+        except ValueError as exc:
+            raise ZoteroClientError(
+                f"list collections: invalid JSON — {response.text[:200]}",
+                response.status_code,
+            ) from exc
+
+        if not isinstance(raw, list):
+            raise ZoteroClientError(
+                f"list collections: expected JSON array, got {type(raw).__name__}",
+                response.status_code,
+            )
+
+        items = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            key = entry.get("key", "")
+            data = entry.get("data") or {}
+            name = data.get("name", "") if isinstance(data, dict) else ""
+            if key:
+                items.append({"key": key, "name": name})
+        items.sort(key=lambda item: (item["name"] or item["key"]).lower())
+        return items
+
     def health_summary(self) -> dict:
         summary = {"zotero_url": self.base_url, "ping": None, "api_plus": None}
         try:

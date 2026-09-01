@@ -13,13 +13,18 @@ Base URL: `https://zotero.keyweb.pl/api/v1`
 | Klucz | Wartość |
 |-------|---------|
 | `ZOTERO20_API_KEY` | klucz z `server/.env` (wymagany) |
+| `ZOTERO20_DEFAULT_COLLECTION_KEY` | 8-znakowy klucz kolekcji Zotero (ustawiany w panelu, zakładka Ustawienia) |
+| `ZOTERO20_DEFAULT_COLLECTION_NAME` | nazwa kolekcji (cache do wyświetlania) |
 
 ## Użycie
 
 1. Rozszerzenia → **Zotero20** → Otwórz panel importu.
-2. Importuj DOI lub ORCID do wybranego badania.
-3. Po imporcie DOI: panel **„Wstaw cytowanie w kursorze”** wysyła `postMessage` do Connectora (patrz niżej).
-4. Jeśli Connector nie reaguje — ręcznie: menu **Zotero → Dodaj/edytuj cytowanie**.
+2. **Jednorazowo:** zakładka **Ustawienia** → wybierz domyślną kolekcję Zotero → **Zapisz**.
+3. Importuj DOI lub ORCID — trafiają automatycznie do zapisanej kolekcji (bez wyboru przy każdym imporcie).
+4. Po imporcie DOI: panel **„Wstaw cytowanie w kursorze”** wysyła `postMessage` do Connectora (patrz niżej).
+5. Jeśli Connector nie reaguje — ręcznie: menu **Zotero → Dodaj/edytuj cytowanie**.
+
+Opcjonalnie: sekcja **Zaawansowane** nadpisuje badaniem z `studies.yaml` (dla zespołów z wieloma badaniami). Pojedynczy użytkownik może pominąć `studies.yaml`.
 
 ## Cytowania i bibliografia (Connector)
 
@@ -61,17 +66,18 @@ Google Docs
          └── postMessage ──► Connector (planowane: auto addEditCitation)
 ```
 
-## Troubleshooting: pusta lista badań / „Wymagane pola: doi, study.”
+## Troubleshooting
 
 | Objaw | Przyczyna | Rozwiązanie |
 |-------|-----------|-------------|
-| Dropdown „Badanie” pusty lub szary | `/api/v1/studies` zwraca błąd lub pustą listę | Skonfiguruj `studies.yaml` na serwerze (patrz `docs/deploy-mikrus.md`) |
-| „Nieprawidłowy klucz API” przy otwarciu panelu | Zły `ZOTERO20_API_KEY` w Script Properties | Ustaw ten sam klucz co w `.env` na Mikrusie |
-| Badania widoczne, ale „(brak collection_key)” | Placeholder `REPLACE_*` w YAML | Wklej prawdziwy `collection_key` z Zotero Local API |
-| Import bez wybranego badania | Kliknięto import przed załadowaniem listy | Poczekaj na „Załadowano N badań” i wybierz badanie |
+| „Ustaw domyślną kolekcję” | Brak zapisanej kolekcji w Script Properties | Zakładka **Ustawienia** → wybierz kolekcję → Zapisz |
+| Pusta lista kolekcji | Zotero niedostępny lub brak folderów | Utwórz kolekcję w Zotero Desktop; sprawdź `/api/v1/collections` |
+| „Nieprawidłowy klucz API” | Zły `ZOTERO20_API_KEY` | Ustaw ten sam klucz co w `.env` na serwerze |
+| Zaawansowane: brak badań | Brak `studies.yaml` | Normalne dla jednego użytkownika — użyj domyślnej kolekcji |
 
 Test z serwera:
 
 ```bash
+curl -sS -H "X-API-Key: $ZOTERO20_API_KEY" https://zotero.keyweb.pl/api/v1/collections
 curl -sS -H "X-API-Key: $ZOTERO20_API_KEY" https://zotero.keyweb.pl/api/v1/studies
 ```

@@ -4,6 +4,8 @@
  */
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
+const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
+const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 
 function onOpen() {
   DocumentApp.getUi()
@@ -19,20 +21,53 @@ function showSidebar() {
   DocumentApp.getUi().showSidebar(html);
 }
 
+function getCollections() {
+  return apiGet('/collections');
+}
+
 function getStudies() {
   return apiGet('/studies');
 }
 
-function importDoi(doi, study) {
-  return apiPost('/import/doi', { doi: doi, study: study });
+function getDefaultCollection() {
+  const props = PropertiesService.getScriptProperties();
+  return {
+    key: props.getProperty(PROP_DEFAULT_COLLECTION_KEY) || '',
+    name: props.getProperty(PROP_DEFAULT_COLLECTION_NAME) || '',
+  };
 }
 
-function importOrcid(orcid, study, limit) {
-  return apiPost('/import/orcid', {
+function saveDefaultCollection(key, name) {
+  if (!key) {
+    throw new Error('Wybierz kolekcję z listy.');
+  }
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty(PROP_DEFAULT_COLLECTION_KEY, key);
+  props.setProperty(PROP_DEFAULT_COLLECTION_NAME, name || key);
+  return getDefaultCollection();
+}
+
+function importDoi(doi, options) {
+  var payload = { doi: doi };
+  if (options && options.study) {
+    payload.study = options.study;
+  } else if (options && options.collectionKey) {
+    payload.collection_key = options.collectionKey;
+  }
+  return apiPost('/import/doi', payload);
+}
+
+function importOrcid(orcid, options, limit) {
+  var payload = {
     orcid: orcid,
-    study: study,
     limit: limit || 50,
-  });
+  };
+  if (options && options.study) {
+    payload.study = options.study;
+  } else if (options && options.collectionKey) {
+    payload.collection_key = options.collectionKey;
+  }
+  return apiPost('/import/orcid', payload);
 }
 
 function getLastStatus() {

@@ -2,8 +2,22 @@ from django.http import JsonResponse
 
 from apps.imports.middleware import json_api, normalize_doi, normalize_orcid, parse_json_body
 from .services.orcid import import_orcid_works
-from .services.studies import StudiesConfigError, get_collection_key, list_studies
+from .services.studies import StudiesConfigError, list_studies, resolve_collection_key
 from .services.zotero import ZoteroClient, ZoteroClientError
+
+
+def _zotero_collections_payload() -> dict:
+    client = ZoteroClient()
+    try:
+        return {
+            "available": True,
+            "items": client.list_collections(),
+        }
+    except ZoteroClientError as exc:
+        return {
+            "available": False,
+            "error": str(exc),
+        }
 
 
 @json_api
@@ -22,13 +36,30 @@ def health(request):
 
 
 @json_api
+def collections_list(request):
+    if request.method != "GET":
+        return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
+
+    payload = _zotero_collections_payload()
+    if not payload.get("available"):
+        return JsonResponse(
+            {"error": payload.get("error", "Nie udało się pobrać kolekcji Zotero.")},
+            status=502,
+        )
+    return JsonResponse({"collections": payload["items"]})
+
+
+@json_api
 def studies_list(request):
     if request.method != "GET":
         return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
     try:
-        return JsonResponse({"studies": list_studies()})
+        payload = {"studies": list_studies()}
     except StudiesConfigError as exc:
         return JsonResponse({"error": str(exc)}, status=500)
+
+    payload["zotero_collections"] = _zotero_collections_payload()
+    return JsonResponse(payload)
 
 
 @json_api
@@ -42,9 +73,12 @@ def import_doi(request):
 
     doi_raw = body.get("doi", "")
     study = body.get("study", "")
-    if not doi_raw or not study:
+    collection_key_raw = body.get("collection_key", "")
+    if not doi_raw:
+        return JsonResponse({"error": "Wymagane pole: doi."}, status=400)
+    if not study and not collection_key_raw:
         return JsonResponse(
-            {"error": "Wymagane pola: doi, study."},
+            {"error": "Wymagane pole: collection_key lub study."},
             status=400,
         )
 
@@ -53,7 +87,10 @@ def import_doi(request):
         return JsonResponse({"error": "Nieprawidłowy format DOI."}, status=400)
 
     try:
-        collection_key = get_collection_key(study)
+        collection_key, study = resolve_collection_key(
+            study=study,
+            collection_key=collection_key_raw,
+        )
     except StudiesConfigError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
@@ -63,15 +100,15 @@ def import_doi(request):
     except ZoteroClientError as exc:
         return JsonResponse({"error": str(exc)}, status=502)
 
-    return JsonResponse(
-        {
-            "success": True,
-            "doi": doi,
-            "study": study,
-            "collection_key": collection_key,
-            "result": result,
-        }
-    )
+    response = {
+        "success": True,
+        "doi": doi,
+        "collection_key": collection_key,
+        "result": result,
+    }
+    if study:
+        response["study"] = study
+    return JsonResponse(response)
 
 
 @json_api
@@ -85,10 +122,13 @@ def import_orcid(request):
 
     orcid_raw = body.get("orcid", "")
     study = body.get("study", "")
+    collection_key_raw = body.get("collection_key", "")
     limit = int(body.get("limit", 50))
-    if not orcid_raw or not study:
+    if not orcid_raw:
+        return JsonResponse({"error": "Wymagane pole: orcid."}, status=400)
+    if not study and not collection_key_raw:
         return JsonResponse(
-            {"error": "Wymagane pola: orcid, study."},
+            {"error": "Wymagane pole: collection_key lub study."},
             status=400,
         )
 
@@ -99,10 +139,20 @@ def import_orcid(request):
     limit = max(1, min(limit, 200))
 
     try:
-        collection_key = get_collection_key(study)
+        collection_key, study = resolve_collection_key(
+            study=study,
+            collection_key=collection_key_raw,
+        )
     except StudiesConfigError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
-    report = import_orcid_works(orcid, study, collection_key, limit=limit)
+    report = import_orcid_works(
+        orcid,
+        study or collection_key,
+        collection_key,
+        limit=limit,
+    )
     status = 200 if not report.errors or report.added else 502
-    return JsonResponse(report.to_dict(), status=status)
+    payload = report.to_dict()
+    payload["collection_key"] = collection_key
+    return JsonResponse(payload, status=status)

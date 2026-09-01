@@ -2,9 +2,10 @@
 #
 # 1. Skopiuj:  cp config/studies.yaml.example config/studies.yaml
 # 2. Utwórz kolekcje w Zotero Desktop.
-# 3. Pobierz collection_key (8-znakowy klucz):
+# 3. Pobierz collection_key (8-znakowy klucz Zotero — NIE nazwa folderu):
 #      curl -s http://127.0.0.1:23119/api/users/0/collections
-#    Szukaj pola "key" przy nazwie kolekcji.
+#    W JSON szukaj pary: "key": "ABC12XYZ" przy "name": "Badanie 1".
+#    Po wdrożeniu API: GET /api/v1/studies → sekcja zotero_collections
 # 4. Wklej prawdziwy klucz zamiast REPLACE_WITH_ZOTERO_COLLECTION_KEY.
 # 5. slug (np. badanie-1) to wartość pola "study" w API i w sidebarze Google Docs.
 

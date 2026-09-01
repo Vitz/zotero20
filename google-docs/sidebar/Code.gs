@@ -202,9 +202,14 @@ function upsertBibliography_(isRefresh) {
     collection_key: collection.key,
     style: style,
   });
-  var entries = data.entries || [];
+  var entries = (data.entries || [])
+    .map(function (e) { return String(e).trim(); })
+    .filter(function (e) { return e; });
   if (!entries.length) {
-    throw new Error('Kolekcja jest pusta — brak pozycji do bibliografii.');
+    var hint = (data.item_count || 0) > 0
+      ? 'Zotero zwróciło pustą bibliografię mimo pozycji w kolekcji — spróbuj inny styl lub odśwież po chwili.'
+      : 'Kolekcja jest pusta — brak pozycji do bibliografii.';
+    throw new Error(hint);
   }
   var result = writeBibliographyToDocument_(entries, data.style_label || style, isRefresh);
   result.collection_key = collection.key;
@@ -242,11 +247,11 @@ function writeBibliographyToDocument_(entries, styleLabel, isRefresh) {
       continue;
     }
     var paragraph = child.asParagraph();
-    var text = paragraph.getText();
-    if (!text) {
+    if (!paragraph.getText()) {
       continue;
     }
-    rangeBuilder.addElement(paragraph, 0, text.length - 1);
+    // NamedRange: Paragraph bez offsetów (offsety tylko dla Text).
+    rangeBuilder.addElement(paragraph);
   }
 
   doc.addNamedRange(NAMED_RANGE_BIBLIOGRAPHY, rangeBuilder.build());

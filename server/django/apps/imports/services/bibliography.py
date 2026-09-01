@@ -4,6 +4,8 @@ import html
 import re
 from html.parser import HTMLParser
 
+from .exceptions import ZoteroClientError
+
 DEFAULT_STYLE_ID = "apa"
 
 # Popularne style CSL (identyfikator = fragment URL zotero.org/styles/…)
@@ -49,7 +51,7 @@ class _BibHtmlParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.entries: list[str] = []
-        self._in_entry = False
+        self._entry_depth = 0
         self._parts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -57,19 +59,26 @@ class _BibHtmlParser(HTMLParser):
             return
         classes = dict(attrs).get("class", "") or ""
         if "csl-entry" in classes.split():
-            self._in_entry = True
+            self._entry_depth = 1
             self._parts = []
+        elif self._entry_depth > 0:
+            self._entry_depth += 1
 
     def handle_endtag(self, tag: str) -> None:
-        if tag == "div" and self._in_entry:
+        if tag != "div" or self._entry_depth == 0:
+            return
+        if self._entry_depth == 1:
             text = html.unescape("".join(self._parts))
             text = re.sub(r"\s+", " ", text).strip()
             if text:
                 self.entries.append(text)
-            self._in_entry = False
+            self._entry_depth = 0
+            self._parts = []
+        else:
+            self._entry_depth -= 1
 
     def handle_data(self, data: str) -> None:
-        if self._in_entry:
+        if self._entry_depth > 0:
             self._parts.append(data)
 
 
@@ -89,8 +98,20 @@ def parse_bib_html(bib_html: str) -> list[str]:
 def export_collection_bibliography(client, source: str, collection_key: str, style_id: str) -> dict:
     """Pobiera sformatowaną bibliografię kolekcji przez Zotero API (format=bib)."""
     resolved_style = resolve_style_id(style_id)
+    try:
+        has_items = bool(client.list_collection_items(collection_key, limit=1))
+    except Exception:
+        has_items = False
+
     bib_html = client.fetch_collection_bibliography(collection_key, resolved_style)
-    entries = parse_bib_html(bib_html)
+    entries = [entry for entry in parse_bib_html(bib_html) if entry.strip()]
+
+    if not entries and has_items:
+        raise ZoteroClientError(
+            "Kolekcja zawiera pozycje, ale Zotero nie zwróciło sformatowanej bibliografii "
+            f"(styl {resolved_style}). Sprawdź styl CSL lub spróbuj ponownie."
+        )
+
     return {
         "collection_key": collection_key,
         "source": source,

@@ -591,7 +591,9 @@
         })
         .withFailureHandler(function (e) {
           setBibliographyButtonsDisabled(false);
-          setStatus(formatScriptError(e), true);
+          var msg = formatScriptError(e);
+          setStatus(msg, true);
+          google.script.run.showPasteAlert(msg, true);
         })
         .insertBibliography();
     }
@@ -649,7 +651,9 @@
         })
         .withFailureHandler(function (e) {
           setBibliographyButtonsDisabled(false);
-          setStatus(formatScriptError(e), true);
+          var msg = formatScriptError(e);
+          setStatus(msg, true);
+          google.script.run.showPasteAlert(msg, true);
         })
         .refreshBibliography();
     }

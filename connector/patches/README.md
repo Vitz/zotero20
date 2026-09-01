@@ -1,23 +1,26 @@
 # Patche na zotero-connectors
 
-Pliki `.patch` nakładane przez `setup.sh` na sklonowane repo upstream.
+Pliki `.patch` nakładane przez `setup.sh` na sklonowane repo upstream (`connector/upstream/`).
 
 ## 001-remote-url-default.patch
 
-- Domyślny `connector.url` → `https://zotero.keyweb.pl`
-- Branding: „Zotero20 Connector”
+- Domyślny `connector.url` → `https://zotero.keyweb.pl/`
+- Pref `zotero20.apiKey` (pusty domyślnie; ustaw w Config Editor)
+- Branding: „Zotero20 Connector” w `manifest.json` i `manifest-v3.json`
 
-## 002-cf-access-headers.patch
+## 002-api-key-header.patch
 
-- Do requestów HTTP do Zotero dodaje nagłówki:
-  - `CF-Access-Client-Id`
-  - `CF-Access-Client-Secret`
-- Wartości z `chrome.storage.local` (Options page) lub build-time `config.json`
+- Nagłówek `X-API-Key` na wszystkich requestach Connector → Zotero Desktop (`connector.js`)
+- Wartość z pref `zotero20.apiKey`
 
-Logika Google Docs **nie jest zmieniana** — tylko transport HTTP.
+## 003-sidebar-postmessage.patch
 
-## 003-sidebar-postmessage.patch.md
+- Nasłuch `postMessage` z panelu **Zotero20 Import** (Apps Script sidebar)
+- Po imporcie DOI przycisk „Wstaw cytowanie” wywołuje `addEditCitation`
+- Protokół: `source: zotero20-sidebar`, `action: addEditCitation`
 
-- Nasłuch `postMessage` z panelu `Zotero20 Import` → `addEditCitation`
-- Szczegóły: `003-sidebar-postmessage.patch.md`
-- **Status:** planowany, nie w `setup.sh`
+Szczegóły protokołu: `003-sidebar-postmessage.patch.md`
+
+## Usunięte
+
+Patche **CF Access** (`CF-Access-Client-Id` / `Secret`) nie są używane — autoryzacja wyłącznie przez `X-API-Key` na bramce Django/Cloudflare.

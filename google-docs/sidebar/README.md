@@ -52,9 +52,9 @@ Po imporcie DOI sidebar wysyła do `window.parent`:
 }
 ```
 
-Connector (content script na `docs.google.com`) powinien nasłuchiwać i wywołać `addEditCitation` — patrz `connector/README.md` (patch planowany w Fazie 2).
+Connector (content script na `docs.google.com`) nasłuchuje i wywołuje `addEditCitation` — patrz `connector/patches/003-sidebar-postmessage.patch`.
 
-**Dziś:** przycisk w sidebarze jest przygotowany; pełna automatyzacja wymaga patcha w fork Connectora. Bez niego użytkownik korzysta z menu Zotero.
+**Fallback:** jeśli Connector nie reaguje, użyj menu **Zotero → Dodaj/edytuj cytowanie**.
 
 ## Diagram
 
@@ -63,7 +63,7 @@ Google Docs
 ├── Menu Zotero (Connector)     ← cytowania, bibliografia, refresh, styl
 └── Panel Zotero20 Import       ← tylko import DOI/ORCID do biblioteki
          │
-         └── postMessage ──► Connector (planowane: auto addEditCitation)
+         └── postMessage ──► Connector (addEditCitation)
 ```
 
 ## Troubleshooting

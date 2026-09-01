@@ -1,0 +1,36 @@
+diff --git a/src/browserExt/manifest-v3.json b/src/browserExt/manifest-v3.json
+index 319cb4c..28bc6d0 100644
+--- a/src/browserExt/manifest-v3.json
++++ b/src/browserExt/manifest-v3.json
+@@ -1,5 +1,5 @@
+ {
+-	"name": "Zotero Connector",
++	"name": "Zotero20 Connector",
+ 	"manifest_version": 3,
+ 	"version": "AUTOFILLED",
+ 	"description": "__MSG_extension_description__",
+diff --git a/src/browserExt/manifest.json b/src/browserExt/manifest.json
+index e47eae3..4cd9570 100644
+--- a/src/browserExt/manifest.json
++++ b/src/browserExt/manifest.json
+@@ -1,5 +1,5 @@
+ {
+-	"name": "Zotero Connector",
++	"name": "Zotero20 Connector",
+ 	"manifest_version": 2,
+ 	"version": "AUTOFILLED",
+ 	"description": "__MSG_extension_description__",
+diff --git a/src/common/zotero.js b/src/common/zotero.js
+index 2ffda6f..d1f7e25 100644
+--- a/src/common/zotero.js
++++ b/src/common/zotero.js
+@@ -344,7 +344,8 @@ Zotero.Prefs = new function() {
+ 		"automaticTags": true, // only affects saves to zotero.org. saves to client governed by pref in the client
+ 		"connector.repo.lastCheck.localTime": 0,
+ 		"connector.repo.lastCheck.repoTime": 0,
+-		"connector.url": 'http://127.0.0.1:23119/',
++		"connector.url": 'https://zotero.keyweb.pl/',
++		"zotero20.apiKey": '',
+ 		"capitalizeTitles": false,
+ 		"interceptKnownFileTypes": true,
+ 		"allowedCSLExtensionHosts": ["^https://raw\\.githubusercontent\\.com/", "^https://gitee\\.com/.+/raw/"],

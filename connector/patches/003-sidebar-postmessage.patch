@@ -1,0 +1,22 @@
+diff --git a/src/zotero-google-docs-integration/src/connector/ui.jsx b/src/zotero-google-docs-integration/src/connector/ui.jsx
+index 292592b..67c2c44 100644
+--- a/src/zotero-google-docs-integration/src/connector/ui.jsx
++++ b/src/zotero-google-docs-integration/src/connector/ui.jsx
+@@ -74,6 +74,17 @@ Zotero.GoogleDocs.UI = {
+ 		this.interceptPaste();
+ 		this.initModeMonitor();
+ 		Zotero.GoogleDocs.UI.LinkInsertBubble.init();
++		// zotero20-sidebar: postMessage bridge from Apps Script import panel
++		window.addEventListener('message', (event) => {
++			const data = event.data;
++			if (!data || data.source !== 'zotero20-sidebar' || data.action !== 'addEditCitation') {
++				return;
++			}
++			if (!Zotero.GoogleDocs.UI.enabled) {
++				return;
++			}
++			Zotero.GoogleDocs.execCommand('addEditCitation');
++		});
+ 	},
+ 
+ 	injectIntoDOM: async function () {

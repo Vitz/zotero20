@@ -1,0 +1,50 @@
+name: Build Connector
+
+on:
+  push:
+    branches: [main, fix/collection-key-ux]
+    paths:
+      - 'connector/**'
+      - '.github/workflows/build-connector.yml'
+  pull_request:
+    paths:
+      - 'connector/**'
+      - '.github/workflows/build-connector.yml'
+  workflow_dispatch:
+
+jobs:
+  build-chrome:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: connector
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup upstream and apply patches
+        run: ./setup.sh
+
+      - name: Install dependencies
+        working-directory: connector/upstream
+        run: npm install
+
+      - name: Build extension
+        working-directory: connector/upstream
+        run: ./build.sh
+
+      - name: Upload Chrome build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zotero20-connector-chrome
+          path: connector/upstream/build/manifestv3/
+          retention-days: 30
+
+      - name: Build summary
+        run: |
+          echo "### Zotero20 Connector build OK" >> "$GITHUB_STEP_SUMMARY"
+          echo "Load unpacked: \`connector/upstream/build/manifestv3\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Or download artifact **zotero20-connector-chrome** from this workflow run." >> "$GITHUB_STEP_SUMMARY"

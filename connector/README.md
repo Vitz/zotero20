@@ -1,67 +1,80 @@
 # Zotero20 Connector (fork)
 
-Jeden host: `https://zotero.keyweb.pl` + nagłówek **X-API-Key**.
+Fork [zotero-connectors](https://github.com/zotero/zotero-connectors) — zdalne Zotero Desktop przez `https://zotero.keyweb.pl` + nagłówek **X-API-Key**.
 
-## Stan repozytorium (scaffold, nie pełny build)
+**Instalacja krok po kroku:** [INSTALL.md](INSTALL.md)
 
-| Element | Status |
-|---------|--------|
-| `setup.sh` — klon upstream + patch X-API-Key | ✅ gotowy |
-| Zmiana nazwy w `manifest.json` | ✅ w `setup.sh` |
-| `patches/README.md` — opis patchy CF Access / URL | 📋 dokumentacja (pliki `.patch` jeszcze nie w repo) |
-| Katalog `upstream/` po klonie | ❌ nie commitowany — powstaje lokalnie po `./setup.sh` |
-| Gotowy build / `dist/` | ❌ trzeba zbudować lokalnie |
-| Nasłuch `postMessage` z sidebara importu | ❌ planowany patch (Faza 2) |
-
-**Wniosek:** fork jest **szkieletem** — zmienia transport HTTP (URL + API key), ale **nie zawiera** gotowej wtyczki ani rozszerzonej integracji Docs. Logika cytowań pochodzi w całości z upstream `zotero-connectors` (content script Google Docs).
-
-## Co daje fork po zbudowaniu
-
-Po `npm run build` i załadowaniu w Chrome/Firefox:
-
-- Menu **Zotero** w Google Docs (jak oficjalny Connector)
-- **Add/Edit Citation** — wstawia field codes w miejscu kursora (citeproc na serwerze)
-- **Add/Edit Bibliography**
-- **Document Preferences** — styl cytowań
-- **Refresh** — odświeżenie cytowań i metadanych
-- **Unlink Citations**
-
-Wszystkie requesty cytowań: `POST /connector/document/execCommand` i `/respond` przez tunel do Zotero Desktop na RPi.
-
-## Build
+## Szybki start
 
 ```bash
 cd connector
 ./setup.sh
-cd upstream && npm install && npm run build
+cd upstream && npm install && ./build.sh
 ```
 
-Chrome → Load unpacked → folder buildu Chrome (np. `upstream/build/browserSpecific/chrome` — ścieżka zależy od wersji upstream).
+Chrome → `chrome://extensions` → Load unpacked → `connector/upstream/build/manifestv3`
 
-## Konfiguracja wtyczki (Options / about:config)
+Config Editor:
 
 | Pref | Wartość |
 |------|---------|
-| `connector.url` | `https://zotero.keyweb.pl` |
-| `zotero20.apiKey` | ten sam co `ZOTERO20_API_KEY` w `.env` |
+| `connector.url` | `https://zotero.keyweb.pl/` |
+| `zotero20.apiKey` | `ZOTERO20_API_KEY` z `server/.env` |
 
-## Planowany patch: sidebar → Connector
+## Co daje fork
 
-Aby przycisk **„Wstaw cytowanie”** w panelu importu otwierał dialog cytowań bez ręcznego menu:
-
-W content script Google Docs (upstream) dodać:
-
-```javascript
-window.addEventListener('message', (event) => {
-  const data = event.data;
-  if (!data || data.source !== 'zotero20-sidebar' || data.action !== 'addEditCitation') return;
-  // itemKey / doi — opcjonalnie prefiltruj wybór w przyszłości
-  Zotero.GoogleDocs.execCommand('addEditCitation');
-});
-```
-
-`itemKey` z sidebara może w przyszłości ograniczyć wybór w dialogu — wymaga dodatkowej pracy w citing protocol (nie w Apps Script).
+| Funkcja | Status |
+|---------|--------|
+| Menu **Zotero** w Google Docs | ✅ upstream + patche |
+| Add/Edit Citation, Bibliography, Refresh | ✅ citing protocol → serwer |
+| Domyślny URL tunelu | ✅ patch 001 |
+| Nagłówek `X-API-Key` | ✅ patch 002 |
+| Branding „Zotero20 Connector” | ✅ patch 001 |
+| Most `postMessage` z sidebara importu | ✅ patch 003 |
+| Build lokalny | `./build.sh` (wymaga bash) |
+| Build CI (GitHub Actions) | `.github/workflows/build-connector.yml` |
 
 ## Patche
 
-Szczegóły w `patches/README.md`. Obecnie `setup.sh` nakłada tylko patch X-API-Key inline na `src/common/http.js`.
+Katalog `patches/` — szczegóły w [patches/README.md](patches/README.md).
+
+| Patch | Cel |
+|-------|-----|
+| `001-remote-url-default.patch` | URL + pref API key + nazwa wtyczki |
+| `002-api-key-header.patch` | `X-API-Key` w `connector.js` |
+| `003-sidebar-postmessage.patch` | sidebar → `addEditCitation` |
+
+Katalog `upstream/` powstaje lokalnie po `setup.sh` — **nie commitowany** (`.gitignore`).
+
+## Integracja z panelem importu
+
+Panel Apps Script (`google-docs/sidebar/`) po imporcie DOI wysyła:
+
+```json
+{
+  "source": "zotero20-sidebar",
+  "action": "addEditCitation",
+  "itemKey": "ABC123XY",
+  "doi": "10.1038/...",
+  "ts": 1710000000000
+}
+```
+
+Connector (patch 003) wywołuje `Zotero.GoogleDocs.execCommand('addEditCitation')`.
+
+Pełna dokumentacja: [docs/google-docs-setup.md](../docs/google-docs-setup.md)
+
+## Architektura
+
+```
+Chrome (Zotero20 Connector)
+  └── docs.google.com — menu Zotero, field codes
+        └── HTTPS → zotero.keyweb.pl/connector/*
+              └── Zotero Desktop (RPi) + citeproc
+
+Google Docs sidebar (Apps Script)
+  └── HTTPS → zotero.keyweb.pl/api/v1/import/*
+        └── Django → Zotero Local API (kolekcje, DOI, ORCID)
+```
+
+Import (sidebar) i cytowania (Connector) są **różnymi ścieżkami** — oba korzystają z tej samej biblioteki na serwerze.

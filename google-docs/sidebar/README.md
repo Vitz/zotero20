@@ -71,7 +71,7 @@ Google Docs
 | Objaw | Przyczyna | Rozwiązanie |
 |-------|-----------|-------------|
 | „Ustaw domyślną kolekcję” | Brak zapisanej kolekcji w Script Properties | Zakładka **Ustawienia** → wybierz kolekcję → Zapisz |
-| Pusta lista kolekcji | Zotero niedostępny lub brak folderów | Utwórz kolekcję w Zotero Desktop; sprawdź `/api/v1/collections` |
+| Pusta lista kolekcji | Biblioteka Zotero na serwerze (Docker) jest pusta lub niesynchronizowana z zotero.org | Zsynchronizuj Zotero na serwerze z kontem online **albo** wpisz klucz ręcznie w Ustawieniach (np. `FVIAD3D8` z URL zotero.org — działa po sync) |
 | „Nieprawidłowy klucz API” | Zły `ZOTERO20_API_KEY` | Ustaw ten sam klucz co w `.env` na serwerze |
 | Zaawansowane: brak badań | Brak `studies.yaml` | Normalne dla jednego użytkownika — użyj domyślnej kolekcji |
 

@@ -38,8 +38,14 @@ function getDefaultCollection() {
 }
 
 function saveDefaultCollection(key, name) {
+  key = String(key || '').trim();
   if (!key) {
-    throw new Error('Wybierz kolekcję z listy.');
+    throw new Error('Wybierz kolekcję z listy lub wpisz klucz ręcznie.');
+  }
+  if (!/^[A-Za-z0-9]{8}$/.test(key)) {
+    throw new Error(
+      'Klucz kolekcji musi mieć dokładnie 8 znaków (litery i cyfry), np. FVIAD3D8 z adresu zotero.org.'
+    );
   }
   const props = PropertiesService.getScriptProperties();
   props.setProperty(PROP_DEFAULT_COLLECTION_KEY, key);

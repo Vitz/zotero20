@@ -6,13 +6,25 @@ from .services.studies import StudiesConfigError, list_studies, resolve_collecti
 from .services.zotero import ZoteroClient, ZoteroClientError
 
 
+_COLLECTIONS_EMPTY_HINT = (
+    "Serwer używa lokalnej biblioteki Zotero (Docker), nie zotero.org. "
+    "Kolekcje z konta online pojawią się dopiero po synchronizacji Zotero na serwerze "
+    "albo możesz podać 8-znakowy klucz kolekcji ręcznie (z URL zotero.org, np. …/collections/FVIAD3D8/collection)."
+)
+
+
 def _zotero_collections_payload() -> dict:
     client = ZoteroClient()
     try:
-        return {
+        items = client.list_collections()
+        payload = {
             "available": True,
-            "items": client.list_collections(),
+            "items": items,
         }
+        if not items:
+            payload["empty"] = True
+            payload["hint"] = _COLLECTIONS_EMPTY_HINT
+        return payload
     except ZoteroClientError as exc:
         return {
             "available": False,
@@ -46,7 +58,10 @@ def collections_list(request):
             {"error": payload.get("error", "Nie udało się pobrać kolekcji Zotero.")},
             status=502,
         )
-    return JsonResponse({"collections": payload["items"]})
+    response = {"collections": payload["items"]}
+    if payload.get("hint"):
+        response["hint"] = payload["hint"]
+    return JsonResponse(response)
 
 
 @json_api

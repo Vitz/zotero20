@@ -41,6 +41,18 @@
     select:disabled, button:disabled { opacity: 0.6; cursor: not-allowed; }
     .error { color: #b00020; }
     .ok { color: #0a7a2f; }
+    #manual-collection-block {
+      display: none;
+      margin-top: 12px;
+      padding: 10px;
+      background: #fff8e1;
+      border: 1px solid #ffe082;
+      border-radius: 4px;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    #manual-collection-block p { margin: 0 0 8px; }
+    #manual-collection-block code { font-size: 11px; }
   </style>
 </head>
 <body>
@@ -62,8 +74,29 @@
     </select>
     <button id="btn-save-default" type="button" onclick="saveDefaultCollection()" disabled>Zapisz domyślną kolekcję</button>
     <p class="hint" style="font-size:11px;color:#555;margin-top:8px;">
-      Lista pobierana na żywo z Zotero (Local API). Nie trzeba edytować <code>studies.yaml</code>.
+      Lista pobierana na żywo z <strong>lokalnej biblioteki Zotero na serwerze</strong> (nie z zotero.org).
+      Jeśli lista jest pusta, zsynchronizuj Zotero na serwerze z kontem online albo wpisz klucz ręcznie poniżej.
     </p>
+
+    <div id="manual-collection-block">
+      <p>
+        <strong>Lista pusta?</strong> Panel korzysta z biblioteki Zotero na serwerze (Docker), a nie z Twojego konta
+        <code>zotero.org</code>. Kolekcje online pojawią się dopiero po synchronizacji albo możesz podać klucz ręcznie.
+      </p>
+      <p>
+        Klucz znajdziesz w adresie kolekcji na zotero.org, np.<br>
+        <code>https://www.zotero.org/knsz/collections/<strong>FVIAD3D8</strong>/collection</code>
+      </p>
+      <p style="font-size:11px;color:#555;">
+        Import zadziała dopiero, gdy ta kolekcja istnieje w bibliotece na serwerze — zwykle po synchronizacji
+        Zotero (Docker) z kontem zotero.org. Po sync klucze online i serwerowe są identyczne.
+      </p>
+      <label for="manual-collection-key">Klucz kolekcji (8 znaków)</label>
+      <input id="manual-collection-key" type="text" placeholder="FVIAD3D8" maxlength="8" autocapitalize="characters" spellcheck="false">
+      <label for="manual-collection-name">Nazwa (opcjonalnie, do wyświetlania)</label>
+      <input id="manual-collection-name" type="text" placeholder="Moja kolekcja">
+      <button id="btn-save-manual" type="button" onclick="saveManualCollection()">Zapisz klucz ręcznie</button>
+    </div>
   </div>
 
   <div id="tab-doi" class="tab">
@@ -228,6 +261,10 @@
       }
     }
 
+    function showManualCollectionBlock(show) {
+      document.getElementById('manual-collection-block').style.display = show ? 'block' : 'none';
+    }
+
     function fillCollectionSelect(selectId, selectedKey) {
       var sel = document.getElementById(selectId);
       sel.innerHTML = '';
@@ -296,14 +333,25 @@
         .withSuccessHandler(function (data) {
           appState.collections = data.collections || [];
           fillCollectionSelect('default-collection', appState.defaultCollection.key);
-          document.getElementById('btn-save-default').disabled = appState.collections.length === 0;
-          if (!appState.collections.length) {
-            setStatus('Brak kolekcji w Zotero — utwórz folder w Zotero Desktop.', true);
+          var hasCollections = appState.collections.length > 0;
+          document.getElementById('btn-save-default').disabled = !hasCollections;
+          showManualCollectionBlock(!hasCollections);
+          if (!hasCollections) {
+            var hint = data.hint || (
+              'Brak kolekcji w bibliotece serwera. To nie jest to samo co zotero.org — ' +
+              'zsynchronizuj Zotero na serwerze z kontem online albo wpisz klucz kolekcji ręcznie (np. FVIAD3D8).'
+            );
+            setStatus(hint, true);
           }
         })
         .withFailureHandler(function (e) {
           fillCollectionSelect('default-collection', '');
-          setStatus('Błąd ładowania kolekcji: ' + e.message, true);
+          showManualCollectionBlock(true);
+          setStatus(
+            'Błąd ładowania kolekcji: ' + e.message +
+            '\n\nMożesz wpisać klucz kolekcji ręcznie poniżej (8 znaków z adresu zotero.org).',
+            true
+          );
         })
         .getCollections();
     }
@@ -337,13 +385,29 @@
       var key = sel.value;
       var name = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : '';
       if (!key) {
-        setStatus('Wybierz kolekcję z listy.', true);
+        setStatus('Wybierz kolekcję z listy lub wpisz klucz ręcznie poniżej.', true);
+        showManualCollectionBlock(true);
         return;
       }
+      persistDefaultCollection(key, name);
+    }
+
+    function saveManualCollection() {
+      var key = document.getElementById('manual-collection-key').value.trim();
+      var name = document.getElementById('manual-collection-name').value.trim();
+      if (!key) {
+        setStatus('Wpisz 8-znakowy klucz kolekcji (np. FVIAD3D8 z adresu zotero.org).', true);
+        return;
+      }
+      persistDefaultCollection(key, name || key);
+    }
+
+    function persistDefaultCollection(key, name) {
       setStatus('Zapisuję…');
       google.script.run
         .withSuccessHandler(function (saved) {
           appState.defaultCollection = saved;
+          fillCollectionSelect('default-collection', appState.defaultCollection.key);
           updateCurrentCollectionLabels();
           setStatus('Zapisano domyślną kolekcję: ' + saved.name);
         })

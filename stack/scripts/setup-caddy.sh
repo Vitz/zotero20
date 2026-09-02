@@ -136,3 +136,17 @@ if [ -n "${ZOTERO20_IMAGE_DJANGO:-}" ] && [ "${LOCAL#*"${ZOTERO20_IMAGE_DJANGO}"
   echo "BŁĄD: Caddy na tym hoście nie serwuje wdrożonego builda (${ZOTERO20_IMAGE_DJANGO})"
   exit 1
 fi
+
+# Adres originu nie jest widoczny w publicznym DNS (rekord jest za proxy Cloudflare),
+# więc wypisujemy go tutaj — to jedyne miejsce, gdzie da się porównać go z rekordem.
+HOST_V6=$(ip -6 addr show scope global 2>/dev/null | awk '/inet6/ {print $2}' | cut -d/ -f1 | head -1)
+HOST_V4=$(curl -sS --max-time 10 -4 https://api.ipify.org 2>/dev/null || true)
+cat <<EOF
+
+== origin dla Cloudflare ==
+Ten host obsługuje ${DOMAIN} na :443 i ma adresy:
+  AAAA : ${HOST_V6:-brak}
+  A    : ${HOST_V4:-brak}  (na Mikrusie :443 współdzielonego IPv4 obsługuje nginx
+         dostawcy, więc rekord A tu nie zadziała — używamy AAAA)
+Rekord ${DOMAIN} w Cloudflare musi wskazywać na powyższy AAAA.
+EOF

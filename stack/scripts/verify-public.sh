@@ -49,20 +49,21 @@ BŁĄD: ${BASE} NIE serwuje wdrożonego builda.
   odpowiedź /api/v1/health       : ${BODY}
   nagłówek X-Zotero20-Origin     : ${ORIGIN:-<brak — odpowiada host bez naszego vhosta Caddy>}
 
-Kontenery na serwerze wdrożeniowym są aktualne (deploy to sprawdza lokalnie),
-więc pod domeną odpowiada INNY backend: rekord DNS / Cloudflare Tunnel /
-reverse proxy wskazuje na inną maszynę niż DEPLOY_HOST.
+Kontenery i Caddy na hoście wdrożeniowym są aktualne (deploy sprawdza to lokalnie,
+także przez własny listener Caddy), więc pod domeną odpowiada INNY backend —
+rekord DNS originu wskazuje na inną maszynę niż DEPLOY_HOST.
 
+Adresu originu nie widać w publicznym DNS, bo rekord jest za proxy Cloudflare.
 Co zrobić:
-  1. Cloudflare → DNS → zotero.keyweb.pl: sprawdź, na co wskazuje rekord.
-     Jeśli to CNAME na <uuid>.cfargotunnel.com — tunel działa na starym hoście.
-  2. Ustaw jedną z dwóch obsługiwanych ścieżek na maszynie z DEPLOY_HOST:
-     a) Cloudflare Tunnel z tego hosta — dodaj sekret CLOUDFLARED_TUNNEL_TOKEN
-        (deploy uruchomi wtedy profil "cloudflared"), a w Cloudflare skieruj
-        hostname na ten tunel z ingress http://127.0.0.1:8089
-     b) proxy przez publiczne :443 tego hosta (Caddy z stack/scripts/setup-caddy.sh)
-        i rekord A (proxied) na jego adres.
+  1. Weź adres z bloku "== origin dla Cloudflare ==" wypisanego przez ten deploy
+     (krok "Deploy stack", na końcu setup-caddy.sh).
+  2. Cloudflare → DNS → rekord tej nazwy. Jeśli AAAA/A różni się od tego adresu,
+     ruch idzie na inną maszynę (np. poprzednią instancję VPS po migracji na inny
+     węzeł — numer VPS zostaje ten sam, zmienia się prefiks IPv6). Popraw rekord.
   3. Wyłącz stary backend, żeby nie mógł ponownie przejąć domeny.
+  4. Alternatywa bez rekordu na origin: Cloudflare Tunnel z hosta wdrożeniowego —
+     ustaw sekret CLOUDFLARED_TUNNEL_TOKEN (deploy włączy profil "cloudflared")
+     i skieruj hostname na ten tunel z ingress http://127.0.0.1:8089.
 ==========================================================================
 EOF
   exit 1

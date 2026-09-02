@@ -83,12 +83,19 @@ ZOTERO20_INTEGRATION=1 ZOTERO20_API_KEY=... ZOTERO_BASE=http://127.0.0.1:8000 \
 
 ## Routing publiczny — dlaczego domena potrafi serwować stary kod
 
-Ścieżka żądania: `zotero.keyweb.pl` → Cloudflare → **origin** → Caddy (`docx2pdf-caddy-1`)
-→ `172.17.0.1:8089` → `zotero20-zotero` → Django.
+Ścieżka żądania: `zotero.keyweb.pl` → Cloudflare → **origin (rekord AAAA)** → Caddy
+(`docx2pdf-caddy-1`) → `172.17.0.1:8089` → `zotero20-zotero` → Django.
 
-Deploy aktualizuje wyłącznie ostatnie ogniwo. Jeśli Cloudflare kieruje domenę na inną
-maszynę (stary rekord DNS albo tunel z poprzedniego hosta), wszystkie testy na hoście
-przechodzą, a użytkownik dostaje stary kod. Dlatego:
+Origin jest wskazywany rekordem **AAAA**, bo `:443` na współdzielonym IPv4 Mikrusa
+obsługuje nginx dostawcy — rekord A tam nie trafia do naszego Caddy. Adres originu nie
+jest widoczny w publicznym DNS (rekord jest za proxy Cloudflare), więc `setup-caddy.sh`
+wypisuje w logu deployu blok `== origin dla Cloudflare ==` z adresem IPv6 hosta —
+to jedyne miejsce, gdzie można porównać go z rekordem w panelu.
+
+Uwaga na migracje Mikrusa: po przeniesieniu VPS-a na inny węzeł numer instancji zostaje
+ten sam, ale zmienia się prefiks IPv6 (np. `2a01:4f9:3100:4648::283` →
+`2a01:4f9:3070:22d7::283`). Stary rekord dalej działa i serwuje poprzednią instancję,
+więc deploy jest zielony, a domena zwraca stary kod. Dlatego:
 
 - `/api/v1/health` zwraca pole `build` z tagiem obrazu,
 - vhost Caddy dokłada nagłówek `X-Zotero20-Origin` z nazwą maszyny,
@@ -101,12 +108,20 @@ Kto naprawdę odpowiada pod domeną:
 curl -sS -D - https://zotero.keyweb.pl/api/v1/health | grep -iE 'x-zotero20-origin|build'
 ```
 
+Który adres realnie odpowiada (test z pominięciem Cloudflare):
+
+```bash
+curl -sSk -g --resolve zotero.keyweb.pl:443:[ADRES_IPV6] \
+  https://zotero.keyweb.pl/api/v1/health
+```
+
 Obsługiwane sposoby wpięcia hosta wdrożeniowego jako originu:
 
-1. **Cloudflare Tunnel z tego hosta** — ustaw sekret `CLOUDFLARED_TUNNEL_TOKEN`
+1. **Rekord AAAA (proxied) na IPv6 hosta** — obecna konfiguracja. Adres bierz z bloku
+   `== origin dla Cloudflare ==` w logu deployu, nie z pamięci.
+2. **Cloudflare Tunnel z tego hosta** — ustaw sekret `CLOUDFLARED_TUNNEL_TOKEN`
    (deploy włączy wtedy profil `cloudflared` z `docker-compose.yml`),
    a w Cloudflare skieruj hostname na ten tunel z ingress `http://127.0.0.1:8089`.
-2. **Publiczne `:443` hosta** — Caddy z `scripts/setup-caddy.sh` plus rekord A (proxied)
-   na adres hosta. Wymaga, by port 443 VPS-a był faktycznie osiągalny z internetu.
+   Odporne na zmianę adresu VPS-a.
 
 Stary origin trzeba wyłączyć — inaczej przy każdej zmianie DNS może wrócić.

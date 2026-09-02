@@ -58,7 +58,22 @@ echo "== migrate =="
 compose exec -T django python manage.py migrate --noinput --fake-initial
 
 echo "== health :${PORT} =="
-curl -fsS "http://127.0.0.1:${PORT}/api/v1/health"
+# Gunicorn na RPi potrzebuje kilkunastu sekund — bez ponowień deploy wywala się
+# na wyścigu, mimo że kontenery wstały poprawnie.
+HEALTH_OK=0
+for attempt in $(seq 1 30); do
+  if curl -fsS --max-time 10 "http://127.0.0.1:${PORT}/api/v1/health"; then
+    HEALTH_OK=1
+    break
+  fi
+  echo "health: próba ${attempt}/30 nieudana, czekam 5s…"
+  sleep 5
+done
+if [ "$HEALTH_OK" != "1" ]; then
+  echo "BŁĄD: /api/v1/health nie odpowiedział po ~150s"
+  compose logs django --tail 80 || true
+  exit 1
+fi
 echo
 
 echo "== prune unused images =="

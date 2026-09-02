@@ -41,6 +41,8 @@ services:
     environment:
       ZOTERO_URL: http://127.0.0.1:23119
       STUDIES_CONFIG: /config/studies.yaml
+      # Widoczny w /api/v1/health — pozwala sprawdzić, czy działa wdrożony obraz.
+      ZOTERO20_BUILD: ${ZOTERO20_IMAGE_DJANGO:-unknown}
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-1}
       GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-180}
       ZOTERO_PROXY_TIMEOUT: ${ZOTERO_PROXY_TIMEOUT:-60}

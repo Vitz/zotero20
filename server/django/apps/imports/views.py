@@ -1,3 +1,5 @@
+import os
+
 from django.http import JsonResponse
 
 from apps.imports.middleware import json_api, normalize_doi, normalize_orcid, parse_json_body
@@ -67,6 +69,8 @@ def health(request):
         {
             "status": "ok" if ok else "degraded",
             "service": "zotero20-api",
+            # Tag obrazu — bez tego nie da się odróżnić „wdrożone” od „wdrożone, ale stare”.
+            "build": os.environ.get("ZOTERO20_BUILD", "unknown"),
             "zotero": zotero,
         },
         status=200 if ok else 503,

@@ -75,11 +75,11 @@ jobs:
             curl -sS --max-time 15 http://127.0.0.1:8089/api/v1/health || true; echo
             echo "=== curl 172.17.0.1:8089 /api/v1/health ==="
             curl -sS --max-time 15 http://172.17.0.1:8089/api/v1/health || true; echo
-            echo "=== curl przez Caddy (Host: zotero.keyweb.pl) ==="
-            docker exec docx2pdf-caddy-1 wget -qO- --header="Host: zotero.keyweb.pl" \
-              http://172.17.0.1:8089/api/v1/health 2>&1 || true; echo
-            echo "=== curl publiczny Z HOSTA ==="
-            curl -sS --max-time 25 https://zotero.keyweb.pl/api/v1/health || true; echo
+            echo "=== przez listener Caddy TEGO hosta (SNI zotero.keyweb.pl) ==="
+            curl -sSk -D - --max-time 25 --connect-to zotero.keyweb.pl:443:127.0.0.1:443 \
+              https://zotero.keyweb.pl/api/v1/health || true; echo
+            echo "=== ten sam adres publicznie (przez Cloudflare) ==="
+            curl -sS -D - --max-time 25 https://zotero.keyweb.pl/api/v1/health || true; echo
 
             echo "=== Caddyfile: vhost zotero.keyweb.pl ==="
             for f in /opt/docx2pdf/Caddyfile.mikrus /opt/docx2pdf/Caddyfile; do

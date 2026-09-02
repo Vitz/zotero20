@@ -87,6 +87,11 @@ jobs:
             done
             docker exec docx2pdf-caddy-1 sh -c 'grep -A 25 zotero.keyweb.pl /etc/caddy/Caddyfile' 2>&1 || true
 
+            echo "=== jak Caddy dostaje konfigurację ==="
+            docker inspect docx2pdf-caddy-1 --format '{{json .Mounts}}' || true
+            docker inspect docx2pdf-caddy-1 --format 'entrypoint={{json .Config.Entrypoint}} cmd={{json .Config.Cmd}}' || true
+            grep -n -A 15 'caddy' /opt/docx2pdf/docker-compose.mikrus.yml 2>/dev/null || true
+
             echo "=== cloudflared / tunele ==="
             docker ps -a --format '{{.Names}}\t{{.Image}}' | grep -i -E 'cloudflare|tunnel|ngrok|frp' || echo "brak kontenerow tunelowych"
             pgrep -af cloudflared || echo "brak procesu cloudflared"

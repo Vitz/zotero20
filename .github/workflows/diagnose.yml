@@ -27,16 +27,24 @@ jobs:
 
       - name: Public endpoint (z runnera, przez Cloudflare)
         run: |
-          echo "=== DNS zotero.keyweb.pl ==="
-          getent hosts zotero.keyweb.pl || true
-          echo "=== DNS ${{ steps.ssh.outputs.host }} ==="
-          getent hosts "${{ steps.ssh.outputs.host }}" || true
+          echo "=== DNS zotero.keyweb.pl (A / AAAA) ==="
+          getent ahostsv4 zotero.keyweb.pl || true
+          getent ahostsv6 zotero.keyweb.pl || true
+          echo "=== DNS docx2pdf-api.keyweb.pl (A / AAAA) ==="
+          getent ahostsv4 docx2pdf-api.keyweb.pl || true
+          getent ahostsv6 docx2pdf-api.keyweb.pl || true
           echo "=== https://zotero.keyweb.pl/api/v1/health ==="
           curl -sS -D - --max-time 30 https://zotero.keyweb.pl/api/v1/health || true
           echo
-          echo "=== origin Mikrus bezpośrednio (Host: zotero.keyweb.pl) ==="
-          ORIGIN_IP=$(getent hosts "${{ steps.ssh.outputs.host }}" | awk '{print $1}' | head -1)
-          curl -sS -k -D - --max-time 20 --resolve "zotero.keyweb.pl:443:${ORIGIN_IP}" \
+          echo "=== https://docx2pdf-api.keyweb.pl/ (znany dobry host, dla porównania nagłówków) ==="
+          curl -sS -D - -o /dev/null --max-time 30 https://docx2pdf-api.keyweb.pl/ || true
+          echo
+          echo "=== origin kandydat: 91.185.184.232 (mydevil / keyweb.pl A) ==="
+          curl -sS -k -D - -o /dev/null --max-time 20 --resolve "zotero.keyweb.pl:443:91.185.184.232" \
+            https://zotero.keyweb.pl/api/v1/health || true
+          echo
+          echo "=== origin kandydat: IPv6 Mikrusa (runner GitHuba zwykle nie ma IPv6) ==="
+          curl -sS -k -g -D - --max-time 20 --resolve "zotero.keyweb.pl:443:[2a01:4f9:3100:4648::283]" \
             https://zotero.keyweb.pl/api/v1/health || true
           echo
 
@@ -50,66 +58,64 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           command_timeout: 10m
           script: |
-            echo "=== hostname / public IP ==="
-            hostname; id
-            curl -sS --max-time 15 https://api.ipify.org || true; echo
+            echo "=== adresy tego hosta ==="
+            hostname
+            ip -6 addr show scope global 2>/dev/null || echo "brak ip -6"
+            ip -4 addr show scope global 2>/dev/null || echo "brak ip -4"
+            echo "--- adresy wyjściowe ---"
+            curl -sS --max-time 15 -4 https://api.ipify.org 2>/dev/null && echo " = wyjscie IPv4" || echo "brak IPv4"
+            curl -sS --max-time 15 -6 https://api64.ipify.org 2>/dev/null && echo " = wyjscie IPv6" || echo "brak IPv6"
 
-            echo "=== docker ps -a (WSZYSTKIE kontenery) ==="
-            docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.CreatedAt}}\t{{.Status}}' || true
+            echo "=== nasłuch 80/443 (kto odbiera ruch z Cloudflare) ==="
+            (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep -E ':80 |:443 ' || echo "brak"
 
-            echo "=== docker compose ls -a ==="
-            docker compose ls -a || true
-
-            echo "=== nasłuch portów 8089/8000/23119 ==="
-            (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep -E '8089|:8000|23119' || echo "brak"
-
-            echo "=== kontenery publikujące 8089 ==="
-            for c in $(docker ps -a --format '{{.Names}}\t{{.Ports}}' | grep 8089 | cut -f1); do
-              echo "--- $c ---"
-              docker inspect "$c" --format '{{.Config.Image}} created={{.Created}} state={{.State.Status}}' || true
-              img=$(docker inspect "$c" --format '{{.Config.Image}}')
-              docker image inspect "$img" --format '{{.RepoDigests}} {{.Created}}' || true
+            echo "=== TEST ORIGINU: IPv6 z AAAA, oba hostname ==="
+            for h in zotero.keyweb.pl docx2pdf-api.keyweb.pl; do
+              echo "--- ${h} @ [2a01:4f9:3100:4648::283]:443 ---"
+              curl -sSk -g -D - --max-time 20 \
+                --resolve "${h}:443:[2a01:4f9:3100:4648::283]" "https://${h}/" 2>&1 | head -25
+              echo
             done
+            echo "--- zotero.keyweb.pl/api/v1/health @ IPv6 AAAA ---"
+            curl -sSk -g --max-time 20 \
+              --resolve "zotero.keyweb.pl:443:[2a01:4f9:3100:4648::283]" \
+              https://zotero.keyweb.pl/api/v1/health 2>&1 | head -5
+            echo
 
-            echo "=== curl 127.0.0.1:8089 /api/v1/health ==="
-            curl -sS --max-time 15 http://127.0.0.1:8089/api/v1/health || true; echo
-            echo "=== curl 172.17.0.1:8089 /api/v1/health ==="
-            curl -sS --max-time 15 http://172.17.0.1:8089/api/v1/health || true; echo
-            echo "=== przez listener Caddy TEGO hosta (SNI zotero.keyweb.pl) ==="
-            curl -sSk -D - --max-time 25 --connect-to zotero.keyweb.pl:443:127.0.0.1:443 \
-              https://zotero.keyweb.pl/api/v1/health || true; echo
-            echo "=== ten sam adres publicznie (przez Cloudflare) ==="
-            curl -sS -D - --max-time 25 https://zotero.keyweb.pl/api/v1/health || true; echo
+            echo "=== TEST ORIGINU: lokalny listener Caddy (127.0.0.1) ==="
+            curl -sSk -D - --max-time 20 --connect-to zotero.keyweb.pl:443:127.0.0.1:443 \
+              https://zotero.keyweb.pl/api/v1/health 2>&1 | head -25
+            echo
 
-            echo "=== Caddyfile: vhost zotero.keyweb.pl ==="
-            for f in /opt/docx2pdf/Caddyfile.mikrus /opt/docx2pdf/Caddyfile; do
-              [ -f "$f" ] && { echo "--- $f ---"; grep -A 25 'zotero.keyweb.pl' "$f" || echo "brak vhosta"; }
-            done
-            docker exec docx2pdf-caddy-1 sh -c 'grep -A 25 zotero.keyweb.pl /etc/caddy/Caddyfile' 2>&1 || true
+            echo "=== TEST: przez Cloudflare (z tego hosta) ==="
+            curl -sS -D - --max-time 25 https://zotero.keyweb.pl/api/v1/health 2>&1 | head -25
+            echo
 
-            echo "=== jak Caddy dostaje konfigurację ==="
-            docker inspect docx2pdf-caddy-1 --format '{{json .Mounts}}' || true
-            docker inspect docx2pdf-caddy-1 --format 'entrypoint={{json .Config.Entrypoint}} cmd={{json .Config.Cmd}}' || true
-            grep -n -A 15 'caddy' /opt/docx2pdf/docker-compose.mikrus.yml 2>/dev/null || true
+            echo "=== PEŁNY Caddyfile widziany przez kontener ==="
+            docker exec docx2pdf-caddy-1 cat /etc/caddy/Caddyfile 2>&1 || true
 
-            echo "=== cloudflared / tunele ==="
-            docker ps -a --format '{{.Names}}\t{{.Image}}' | grep -i -E 'cloudflare|tunnel|ngrok|frp' || echo "brak kontenerow tunelowych"
-            pgrep -af cloudflared || echo "brak procesu cloudflared"
-            systemctl list-units --type=service 2>/dev/null | grep -i -E 'cloudflared|tunnel|caddy|nginx' || true
-            ls -la /etc/cloudflared 2>/dev/null || true
+            echo "=== nagłówki wszystkich site blocków (kolejność!) ==="
+            docker exec docx2pdf-caddy-1 grep -nE '^[^[:space:]#].*\{[[:space:]]*$' /etc/caddy/Caddyfile 2>&1 || true
 
-            echo "=== czy cokolwiek na hoscie slucha 80/443 ==="
-            (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep -E ':80 |:443 ' || echo "brak 80/443 na hoscie"
+            echo "=== ZAŁADOWANA konfiguracja z admin API ==="
+            docker exec docx2pdf-caddy-1 wget -qO- http://127.0.0.1:2019/config/ 2>&1 | head -c 6000 \
+              || echo "admin API niedostępne"
+            echo
+            echo "=== caddy adapt --pretty (co Caddy realnie robi z pliku) ==="
+            docker exec docx2pdf-caddy-1 caddy adapt --config /etc/caddy/Caddyfile --pretty 2>&1 | head -c 6000 || true
+            echo
 
-            echo "=== stack .env (bez sekretow) ==="
-            grep -E '^(ZOTERO20_IMAGE|ZOTERO20_HOST_PORT|GUNICORN|DJANGO_ALLOWED_HOSTS)' \
-              "${{ vars.DEPLOY_PATH }}/stack/.env" || true
-            echo "=== inne katalogi ze stackiem zotero ==="
-            ls -la /home/*/ 2>/dev/null | head -60 || true
-            find / -maxdepth 4 -name 'docker-compose.y*ml' -path '*zotero*' 2>/dev/null || true
+            echo "=== każde wystąpienie 'zotero', '172.16.2.10' i 'import' w konfiguracjach ==="
+            grep -rn -E 'zotero|172\.16\.2\.10|^import|[^a-z]import ' /opt/docx2pdf/ 2>/dev/null \
+              | grep -v -E 'Binary|\.bak' | head -60 || echo "brak"
+            docker exec docx2pdf-caddy-1 sh -c "grep -n -E 'zotero|172\.16\.2\.10|import' /etc/caddy/Caddyfile" 2>&1 || true
 
-            echo "=== git w DEPLOY_PATH ==="
-            git -C "${{ vars.DEPLOY_PATH }}" log -1 --oneline || true
+            echo "=== czy Mikrus ma własny front proxy (nginx) przed kontenerami ==="
+            ls -la /etc/nginx 2>/dev/null | head -20 || echo "brak /etc/nginx"
+            pgrep -af 'nginx|haproxy' | grep -v grep || echo "brak nginx/haproxy w tym kontenerze VPS"
+
+            echo "=== kontenery ==="
+            docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}' || true
 
       - name: App diagnostics (Mikrus)
         if: ${{ inputs.mode == 'app' }}

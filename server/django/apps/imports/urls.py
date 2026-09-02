@@ -11,5 +11,6 @@ urlpatterns = [
     path("collection-items", views.collection_items, name="collection-items"),
     path("styles", views.styles_list, name="styles"),
     path("bibliography", views.bibliography_generate, name="bibliography"),
+    path("citations", views.citations_generate, name="citations"),
     path("items/<str:item_key>", views.item_detail, name="item-detail"),
 ]

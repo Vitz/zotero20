@@ -1,94 +1,120 @@
-# Panel importu ORCID/DOI (Zotero20 Import)
+# Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
+Wersja plików Apps Script: **2.0.0** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
 
-## Co robi ten sidebar (dziś)
+## Co robi panel
 
-**Import** — dodaje pozycje do biblioteki Zotero na serwerze (DOI / ORCID → kolekcja badania).
+**Import** — dodaje pozycje do biblioteki Zotero na serwerze (DOI / ORCID → kolekcja).
 
-**Proste wstawianie cytowań** — zamienia placeholder w tekście dokumentu na skrót `(Autor, rok)`:
-- wpisz w dokumencie `[*]` albo `[10.1038/...]` / `[doi:...]` przed importem,
-- po imporcie DOI placeholder zostanie zamieniony automatycznie (albo użyj przycisku **Wklej zamiast [*]**).
+**Śledzone cytowania w tekście** — wstawia cytowanie w miejscu kursora (albo zamiast `[*]`) i oznacza je
+ukrytą kotwicą-linkiem `https://zotero.keyweb.pl/cite/<ITEMKEY>?c=<id>`. Kotwica:
 
-**Prosta bibliografia** — zakładka **Literatura**: wstawia listę źródeł z domyślnej kolekcji na końcu dokumentu (styl CSL przez Zotero API). Odświeżanie zastępuje sekcję oznaczoną `ZOTERO20_BIBLIOGRAPHY`.
+- przeżywa zamknięcie i ponowne otwarcie dokumentu,
+- przeżywa kopiowanie tekstu, cofanie zmian i zrobienie kopii pliku,
+- pozwala odnaleźć wszystkie cytowania skanowaniem dokumentu (bez rejestru w `DocumentProperties`).
 
-To **nie** są field codes Zotero — cytowania w tekście nie odświeżają się po zmianie stylu. Pełne cytowania (numeracja, ibid., linkowanie cytat↔bibliografia) nadal wymagają menu **Zotero** przez **Zotero20 Connector**.
+**Bibliografia tylko z cytowanych pozycji** — budowana wyłącznie z kotwic znalezionych w dokumencie,
+w kolejności cytowania. Tryb „cała kolekcja” to osobny, domyślnie wyłączony przełącznik — panel
+**nigdy** nie przełącza się na niego sam.
+
+**Wspólny styl** — jeden wybór stylu CSL steruje jednocześnie cytowaniami w tekście i bibliografią.
+Przycisk **Zmień styl (cytowania + bibliografia)** przelicza jedno i drugie z tej samej odpowiedzi serwera
+(`POST /api/v1/citations`), więc format i numeracja nie mogą się rozjechać.
+
+### Style numeryczne
+
+Dla IEEE i Vancouver numery `[1]`, `[2]` nadaje serwer według kolejności cytowania w dokumencie,
+a bibliografia jest w tej samej kolejności. Style autor–rok (APA, Chicago, Harvard, MLA)
+dostają bibliografię posortowaną alfabetycznie.
+
+### Czego to nadal nie robi
+
+To **nie** są field codes Zotero. Bez Connectora nie ma: `ibid.`, skracania powtórzonych cytowań,
+grup cytowań w jednym nawiasie, lokatorów (strony), klikalnego linku cytat → wpis bibliografii.
+Apps Script nie ma API do pól dokumentu — kotwica-link to najbliższy możliwy odpowiednik.
+
+## Instalacja bez clasp (kopiowanie ręczne)
+
+1. Google Docs → **Rozszerzenia → Apps Script**.
+2. Podmień **oba** pliki, zawsze razem:
+   - `Code.gs` ← `google-docs/sidebar/Code.gs`
+   - `Sidebar.html` ← `google-docs/sidebar/Sidebar.html`
+3. Zapisz projekt, wróć do dokumentu i odśwież stronę (F5).
+4. **Zotero20 → Otwórz panel importu**.
+
+Jeśli skopiujesz tylko jeden plik, panel wyświetli czerwone ostrzeżenie o niezgodnych wersjach —
+to zabezpieczenie przed „naprawami, które nie działają, bo w Docs jest stary kod”.
 
 ## Script Properties
 
 | Klucz | Wartość |
 |-------|---------|
 | `ZOTERO20_API_KEY` | klucz z `server/.env` (wymagany) |
-| `ZOTERO20_DEFAULT_COLLECTION_KEY` | 8-znakowy klucz kolekcji Zotero (ustawiany w panelu, zakładka Ustawienia) |
+| `ZOTERO20_DEFAULT_COLLECTION_KEY` | 8-znakowy klucz kolekcji Zotero (ustawiany w panelu) |
 | `ZOTERO20_DEFAULT_COLLECTION_NAME` | nazwa kolekcji (cache do wyświetlania) |
-| `ZOTERO20_BIBLIOGRAPHY_STYLE` | styl CSL bibliografii (np. `apa`, `ieee`) |
+
+Ustawienia per dokument (Document Properties, ustawiane z panelu):
+`ZOTERO20_BIBLIOGRAPHY_STYLE`, `ZOTERO20_BIBLIOGRAPHY_CITED_ONLY`, `ZOTERO20_CITATION_INSERT_MODE`.
+Styl był wcześniej globalny (Script Properties) i przeciekał między dokumentami — teraz jest
+migrowany do właściwości dokumentu przy pierwszym odczycie.
 
 ## Użycie
 
-1. Rozszerzenia → **Zotero20** → Otwórz panel importu.
-2. **Jednorazowo:** zakładka **Ustawienia** → wybierz domyślną kolekcję Zotero → **Zapisz**.
-3. W dokumencie wpisz placeholder: `[*]` lub `[10.1038/...]` (DOI importowanej pracy).
-4. Importuj DOI lub ORCID — trafiają automatycznie do zapisanej kolekcji.
-5. Po imporcie DOI: jeśli placeholder jest w dokumencie, zostanie zamieniony na `(Autor, rok)`. W razie potrzeby użyj **Wklej zamiast [*]**.
-6. Zakładka **Literatura** → wybierz styl → **Wstaw literaturę** (lub **Odśwież bibliografię** po zmianie kolekcji/stylu).
-7. Pełne cytowania Zotero (field codes, Refresh): menu **Zotero → Dodaj/edytuj cytowanie**.
+1. **Jednorazowo:** zakładka **Ustawienia** → wybierz domyślną kolekcję Zotero → **Zapisz**.
+2. Zakładka **Cytowania** → wybierz styl CSL i tryb wstawiania (kursor / `[*]`).
+3. Zakładka **DOI** → zaimportuj pracę.
+4. Ustaw kursor w dokumencie → **Wstaw cytowanie**. Cytowanie zostaje kotwicą.
+5. Zakładka **Cytowania** → **Wstaw bibliografię** (tylko cytowane pozycje).
+6. Zmiana stylu: wybierz inny styl → **Zmień styl (cytowania + bibliografia)**.
 
-Opcjonalnie: sekcja **Zaawansowane** nadpisuje badaniem z `studies.yaml` (dla zespołów z wieloma badaniami). Pojedynczy użytkownik może pominąć `studies.yaml`.
+Wstawienie kolejnego cytowania automatycznie przelicza numerację i odświeża bibliografię,
+jeśli już istnieje w dokumencie.
 
-## Cytowania i bibliografia (Connector)
+## Migracja z wersji 1.x
 
-| Funkcja | Gdzie |
-|---------|--------|
-| Prosty tekst `(Autor, rok)` zamiast `[*]` | Panel **Zotero20 Import** (Apps Script) |
-| Bibliografia (lista na końcu dokumentu) | Panel **Zotero20 Import** → zakładka **Literatura** |
-| Wstaw/edytuj cytowanie (field codes) | Menu **Zotero** (Zotero20 Connector) |
-| Bibliografia z field codes + Refresh | **Zotero → Dodaj/edytuj bibliografię** |
-| Styl (APA, IEEE, …) | **Zotero → Preferencje dokumentu** |
-| Odświeżenie pól | **Zotero → Refresh** |
-| Odlinkowanie | **Zotero → Unlink Citations** |
+Cytowania wstawione starą wersją były oznaczane `NamedRange` + rejestrem `ZOTERO20_CITATION_RANGES`.
+Przy pierwszym uruchomieniu wersji 2.0.0 panel jednorazowo konwertuje zachowane zakresy na kotwice-linki
+i czyści stary rejestr. Cytowania, których `NamedRange` już nie istnieje (typowa przyczyna komunikatu
+„brak śledzonych cytowań”), trzeba wstawić ponownie.
 
-Wymaga zbudowanego i załadowanego **Zotero20 Connector** (`connector/setup.sh` → build → Load unpacked).
+## Endpointy używane przez panel
 
-## Placeholdery w dokumencie
-
-Kolejność wyszukiwania (pierwsze trafienie w dokumencie):
-
-1. `[*]`
-2. `[doi]`, `[10.xxxx/...]`, `[doi:10.xxxx/...]` — dla importu DOI
-3. `[orcid]`, `[0000-0002-...]` — dla ORCID
-
-Błąd jeśli żaden placeholder nie występuje w tekście.
-
-## Opcjonalnie: postMessage → Connector
-
-Patch `003-sidebar-postmessage` nadal pozwala Connectorrowi otworzyć dialog cytowań po `postMessage`, ale sidebar **domyślnie** używa zamiany placeholderów (nie wymaga kursora ani Connectora do prostego tekstu).
-
-## Diagram
-
-```
-Google Docs
-├── Menu Zotero (Connector)     ← field codes, bibliografia, refresh, styl
-└── Panel Zotero20 Import       ← import DOI/ORCID + zamiana [*] → (Autor, rok)
-         │
-         └── Apps Script API ──► zotero.keyweb.pl/api/v1
-```
+| Endpoint | Do czego |
+|----------|----------|
+| `GET /styles` | lista stylów CSL |
+| `GET /items/<key>?style=` | tekst cytowania pojedynczej pozycji |
+| `POST /citations` | cytowania w tekście **i** bibliografia dla listy `item_keys` (jeden styl) |
+| `POST /bibliography` | bibliografia z `item_keys` albo z `collection_key` (tryb awaryjny) |
 
 ## Troubleshooting
 
 | Objaw | Przyczyna | Rozwiązanie |
 |-------|-----------|-------------|
-| „Ustaw domyślną kolekcję” | Brak zapisanej kolekcji w Script Properties | Zakładka **Ustawienia** → wybierz kolekcję → Zapisz |
-| Pusta lista kolekcji | Serwer bez `ZOTERO_WEB_API_KEY` (fallback Local API) albo biblioteka Docker pusta | Sprawdź `GET /api/v1/collections` — pole `"source"` powinno być `"web"`. Po deploy odśwież panel. Wpisz klucz ręcznie w Ustawieniach (np. `FVIAD3D8`) |
-| Tekst „Local API” w panelu | Stara wersja sidebara (przed `clasp push`) | `clasp push` z `google-docs/sidebar/`, zamknij i otwórz panel ponownie |
+| Czerwone „Niezgodne wersje plików” | Skopiowano tylko `Code.gs` albo tylko `Sidebar.html` | Skopiuj oba pliki i odśwież dokument |
+| „Brak cytowań w dokumencie…” przy bibliografii | W dokumencie nie ma kotwic (np. tekst wklejony ręcznie albo cytowania z wersji 1.x) | Wstaw cytowania przyciskiem **Wstaw cytowanie** |
+| Bibliografia z całej kolekcji zamiast cytowanych | Włączony przełącznik **Wstaw CAŁĄ kolekcję** | Zakładka Cytowania → rozwiń „Tryb awaryjny” → odznacz |
+| „Nie widzę kursora w dokumencie” | Kursor nigdy nie był ustawiony w tekście | Kliknij w dokument w miejscu cytowania, potem **Wstaw cytowanie** |
+| „Brak [*]” | Tryb `[*]`, brak placeholdera | Wpisz `[*]` albo przełącz tryb na „w miejscu kursora” |
+| „Brak bibliografii w dokumencie” przy odświeżaniu | Sekcja została usunięta z dokumentu | Użyj **Wstaw bibliografię** |
+| Pusta lista kolekcji | Serwer bez `ZOTERO_WEB_API_KEY` albo pusta biblioteka Docker | Sprawdź `GET /api/v1/collections` (`"source"` = `"web"`), albo wpisz klucz kolekcji ręcznie |
 | „Nieprawidłowy klucz API” | Zły `ZOTERO20_API_KEY` | Ustaw ten sam klucz co w `.env` na serwerze |
-| „W dokumencie brak [*]…” | Brak placeholdera w tekście | Wpisz `[*]` lub `[DOI]` w dokumencie przed importem / wklejeniem |
-| Zaawansowane: brak badań | Brak `studies.yaml` | Normalne dla jednego użytkownika — użyj domyślnej kolekcji |
 
 Test z serwera:
 
 ```bash
-curl -sS -H "X-API-Key: $ZOTERO20_API_KEY" https://zotero.keyweb.pl/api/v1/collections
 curl -sS -H "X-API-Key: $ZOTERO20_API_KEY" https://zotero.keyweb.pl/api/v1/styles
 curl -sS -H "X-API-Key: $ZOTERO20_API_KEY" -H "Content-Type: application/json" \
-  -d '{"collection_key":"FVIAD3D8","style":"apa"}' https://zotero.keyweb.pl/api/v1/bibliography
+  -d '{"item_keys":["ITEMKEY1","ITEMKEY2"],"style":"ieee"}' \
+  https://zotero.keyweb.pl/api/v1/citations
 ```
+
+## Cytowania pełne (Connector)
+
+| Funkcja | Gdzie |
+|---------|--------|
+| Śledzone cytowania + bibliografia z cytowanych | Panel **Zotero20** (Apps Script) |
+| Wstaw/edytuj cytowanie (field codes), `ibid.`, lokatory | Menu **Zotero** (Zotero20 Connector) |
+| Odświeżenie pól / odlinkowanie | **Zotero → Refresh / Unlink Citations** |
+
+Wymaga zbudowanego i załadowanego **Zotero20 Connector** (`connector/setup.sh` → build → Load unpacked).

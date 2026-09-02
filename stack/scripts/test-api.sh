@@ -104,6 +104,41 @@ if [ "${SMOKE_TEST_BIBLIOGRAPHY:-1}" != "0" ] && [ -n "$COLLECTIONS_JSON" ]; the
   fi
 fi
 
+if [ "${SMOKE_TEST_CITATIONS:-1}" != "0" ] && [ -n "$COLLECTIONS_JSON" ] && command -v python3 >/dev/null; then
+  COLL_KEY="${SMOKE_TEST_COLLECTION_KEY:-}"
+  if [ -z "$COLL_KEY" ]; then
+    COLL_KEY=$(echo "$COLLECTIONS_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['collections'][0]['key'] if d.get('collections') else '')" 2>/dev/null || true)
+  fi
+  ITEM_KEYS=""
+  if [ -n "$COLL_KEY" ]; then
+    ITEM_KEYS=$(curl -sS "${HDR[@]}" "$BASE/api/v1/collection-items?collection_key=$COLL_KEY&limit=3" \
+      | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps([i['key'] for i in d.get('items',[])][:3]))" 2>/dev/null || true)
+  fi
+  if [ -n "$ITEM_KEYS" ] && [ "$ITEM_KEYS" != "[]" ]; then
+    echo "== citations smoke (item_keys=$ITEM_KEYS, style=ieee) =="
+    CIT_JSON=$(curl -sS "${HDR[@]}" -H "Content-Type: application/json" \
+      -d "{\"item_keys\":$ITEM_KEYS,\"style\":\"ieee\"}" \
+      "$BASE/api/v1/citations")
+    echo "$CIT_JSON"
+    # Styl numeryczny musi mieć rosnącą numerację cytowań i wpisów bibliografii.
+    if ! echo "$CIT_JSON" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+citations = [c['citation_text'] for c in data.get('citations', [])]
+entries = data.get('entries', [])
+expected = ['[%d]' % (i + 1) for i in range(len(citations))]
+assert citations == expected, 'zła numeracja cytowań: %s' % citations
+assert all(e.startswith('[%d] ' % (i + 1)) for i, e in enumerate(entries)), 'zła numeracja bibliografii'
+print('citations OK (%d pozycji)' % len(entries))
+"; then
+      echo "BŁĄD: /api/v1/citations zwrócił niespójną numerację"
+      exit 1
+    fi
+  else
+    echo "Pominięto citations smoke — brak pozycji w kolekcji"
+  fi
+fi
+
 if [ "${SMOKE_TEST_DOI_IMPORT:-0}" = "1" ]; then
   COLL_KEY="${SMOKE_TEST_COLLECTION_KEY:-}"
   if [ -z "$COLL_KEY" ] && command -v python3 >/dev/null; then

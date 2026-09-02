@@ -201,6 +201,20 @@ class TestBibliographyEndpoint:
         assert response.status_code == 400
 
     @responses.activate
+    def test_bibliography_empty_item_keys_never_falls_back_to_collection(
+        self, api_client, auth_headers
+    ):
+        register_full_local_api(responses)
+        response = api_client.post(
+            "/api/v1/bibliography",
+            data=json.dumps({"item_keys": [], "collection_key": COLLECTION_KEY, "style": "apa"}),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 400
+        assert "item_keys" in response.json()["error"]
+
+    @responses.activate
     def test_bibliography_invalid_style(self, api_client, auth_headers):
         response = api_client.post(
             "/api/v1/bibliography",
@@ -211,6 +225,89 @@ class TestBibliographyEndpoint:
             **auth_headers,
         )
         assert response.status_code == 400
+
+
+@pytest.mark.django_db
+class TestCitationsEndpoint:
+    @responses.activate
+    def test_returns_citations_and_bibliography_in_one_call(self, api_client, auth_headers):
+        register_full_local_api(responses)
+        response = api_client.post(
+            "/api/v1/citations",
+            data=json.dumps({"item_keys": [ITEM_KEY_2, ITEM_KEY_1], "style": "apa"}),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["style"] == "apa"
+        assert data["numeric"] is False
+        assert [c["item_key"] for c in data["citations"]] == [ITEM_KEY_2, ITEM_KEY_1]
+        assert data["citations"][0]["citation_text"] == "(Kowalski, 2020)"
+        assert data["entries"][0].startswith("Kowalski")
+        assert data["entries"][1].startswith("Smith")
+
+    @responses.activate
+    def test_numeric_style_keeps_citations_and_entries_consistent(
+        self, api_client, auth_headers
+    ):
+        register_full_local_api(responses)
+        response = api_client.post(
+            "/api/v1/citations",
+            data=json.dumps({"item_keys": [ITEM_KEY_2, ITEM_KEY_1], "style": "ieee"}),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["numeric"] is True
+        assert [c["citation_text"] for c in data["citations"]] == ["[1]", "[2]"]
+        assert data["entries"][0].startswith("[1] Kowalski")
+        assert data["entries"][1].startswith("[2] Smith")
+
+    @responses.activate
+    def test_duplicate_keys_are_deduplicated(self, api_client, auth_headers):
+        register_full_local_api(responses)
+        response = api_client.post(
+            "/api/v1/citations",
+            data=json.dumps(
+                {"item_keys": [ITEM_KEY_1, ITEM_KEY_2, ITEM_KEY_1], "style": "ieee"}
+            ),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["item_keys"] == [ITEM_KEY_1, ITEM_KEY_2]
+        assert data["item_count"] == 2
+
+    @responses.activate
+    def test_requires_item_keys(self, api_client, auth_headers):
+        response = api_client.post(
+            "/api/v1/citations",
+            data=json.dumps({"style": "apa"}),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 400
+
+    @responses.activate
+    def test_rejects_too_many_item_keys(self, api_client, auth_headers):
+        response = api_client.post(
+            "/api/v1/citations",
+            data=json.dumps({"item_keys": [f"KEY{i:05d}" for i in range(151)], "style": "apa"}),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 400
+
+    def test_requires_auth(self, api_client):
+        response = api_client.post(
+            "/api/v1/citations",
+            data=json.dumps({"item_keys": [ITEM_KEY_1], "style": "apa"}),
+            content_type="application/json",
+        )
+        assert response.status_code == 401
 
 
 @pytest.mark.django_db

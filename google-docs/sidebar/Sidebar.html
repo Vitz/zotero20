@@ -93,17 +93,46 @@
     }
     #manual-collection-block p { margin: 0 0 8px; }
     #manual-collection-block code { font-size: 11px; }
+    #citation-summary {
+      margin: 10px 0;
+      padding: 8px;
+      background: #eef4ff;
+      border: 1px solid #c5d8f7;
+      border-radius: 4px;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    #version-warning {
+      display: none;
+      margin: 8px 0;
+      padding: 8px;
+      background: #ffebee;
+      border: 1px solid #ef9a9a;
+      border-radius: 4px;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .danger-block {
+      margin-top: 8px;
+      padding: 8px;
+      background: #fff3e0;
+      border: 1px solid #ffcc80;
+      border-radius: 4px;
+      font-size: 11px;
+      line-height: 1.4;
+    }
   </style>
 </head>
 <body>
   <h2>Zotero20 Import</h2>
-  <p>Importuj źródła do kolekcji na serwerze. Wstawianie cytowań wymaga <strong>Zotero20 Connector</strong> (menu Zotero w Docs).</p>
+  <p>Importuj źródła do kolekcji na serwerze, wstawiaj śledzone cytowania i buduj bibliografię z tego, co faktycznie zacytowane.</p>
+  <div id="version-warning"></div>
 
   <div class="tabs">
     <button type="button" onclick="showTab('settings')">Ustawienia</button>
     <button type="button" onclick="showTab('doi')">DOI</button>
     <button type="button" onclick="showTab('orcid')">ORCID</button>
-    <button type="button" onclick="showTab('biblio')">Literatura</button>
+    <button type="button" onclick="showTab('biblio')">Cytowania</button>
     <button type="button" onclick="showTab('status')">Status</button>
   </div>
 
@@ -175,27 +204,49 @@
       <strong>Domyślna kolekcja</strong>
       <span id="current-collection-biblio-label"></span>
     </div>
-    <p>Generuje listę literatury na końcu dokumentu. Domyślnie tylko pozycje cytowane w tekście (jak Zotero Connector).</p>
-    <label for="biblio-style">Styl cytowań (CSL)</label>
+    <div id="citation-summary">Sprawdzam cytowania w dokumencie…</div>
+
+    <label for="biblio-style">Styl cytowań i bibliografii (CSL)</label>
     <select id="biblio-style" disabled>
       <option value="">Ładowanie stylów…</option>
     </select>
-    <label style="display:flex;align-items:center;gap:6px;margin:10px 0 8px;font-size:12px;">
-      <input id="biblio-cited-only" type="checkbox" checked>
-      Tylko cytowane w dokumencie
-    </label>
-    <button id="btn-insert-biblio" type="button" onclick="doInsertBibliography()" disabled>Wstaw literaturę</button>
-    <button id="btn-refresh-biblio" type="button" onclick="doRefreshBibliography()" disabled>Odśwież bibliografię</button>
-    <button id="btn-refresh-citations" type="button" onclick="doRefreshInTextCitations()" disabled>Odśwież cytowania w tekście</button>
-    <p class="hint" style="font-size:11px;color:#555;margin-top:10px;">
-      Cytowania wstawione przez <strong>[*]</strong> (import DOI → „Wklej zamiast [*]”) są śledzone w dokumencie
-      i można je odświeżyć po zmianie stylu CSL — tak jak bibliografię.
-      To zwykły tekst, nie pole Zotero (Connector).
-    </p>
+    <button id="btn-apply-style" type="button" onclick="doApplyStyle()" disabled>
+      Zmień styl (cytowania + bibliografia)
+    </button>
     <p class="hint" style="font-size:11px;color:#555;margin-top:6px;">
-      „Odśwież bibliografię” zastępuje istniejącą sekcję (nagłówek <strong>Bibliografia</strong> + wpisy).
-      Zmiana stylu wymaga odświeżenia. Tryb „cała kolekcja”: do 150 pozycji (Zotero API).
+      Jeden przycisk przelicza <strong>wszystkie</strong> cytowania w tekście i bibliografię tym samym stylem.
+      W stylach numerycznych (IEEE, Vancouver) numery [1], [2] są nadawane wg kolejności cytowania.
     </p>
+
+    <label for="insert-mode">Gdzie wstawiać cytowanie</label>
+    <select id="insert-mode" onchange="persistInsertMode()">
+      <option value="cursor">W miejscu kursora w dokumencie</option>
+      <option value="placeholder">Zamiast [*] w tekście</option>
+    </select>
+
+    <button id="btn-insert-biblio" type="button" onclick="doInsertBibliography()" disabled>Wstaw bibliografię</button>
+    <button id="btn-refresh-biblio" type="button" onclick="doRefreshBibliography()" disabled>Odśwież bibliografię</button>
+    <button id="btn-refresh-citations" type="button" onclick="doRefreshCitationList()">Odśwież listę cytowań</button>
+
+    <p class="hint" style="font-size:11px;color:#555;margin-top:10px;">
+      Bibliografia powstaje <strong>wyłącznie</strong> z pozycji cytowanych w dokumencie i trafia na jego koniec
+      (nagłówek <strong>Bibliografia</strong> + wpisy). Trzymaj ją jako ostatnią sekcję.
+    </p>
+
+    <details id="whole-collection-block">
+      <summary>Tryb awaryjny: wstaw CAŁĄ kolekcję</summary>
+      <div class="danger-block">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+          <input id="biblio-whole-collection" type="checkbox" onchange="persistWholeCollection()">
+          Wstaw wszystkie pozycje z kolekcji, ignorując cytowania
+        </label>
+        <p style="margin:6px 0 0;">
+          Domyślnie wyłączone. Panel <strong>nigdy</strong> nie przełącza się na ten tryb sam —
+          jeśli w dokumencie nie ma cytowań, zobaczysz błąd zamiast całej kolekcji.
+          Limit Zotero API: 150 pozycji.
+        </p>
+      </div>
+    </details>
   </div>
 
   <div id="tab-status" class="tab">
@@ -210,17 +261,17 @@
   <div id="duplicate-offer">
     <strong>Pozycja już w kolekcji</strong>
     <p id="duplicate-offer-text"></p>
-    <button type="button" id="btn-paste-duplicate" onclick="pasteDuplicateItem()">Wklej zamiast [*]</button>
+    <button type="button" id="btn-paste-duplicate" onclick="pasteDuplicateItem()">Wstaw cytowanie</button>
   </div>
 
   <div id="post-import">
     <h3>Źródło w bibliotece</h3>
     <p id="post-import-summary"></p>
-    <button type="button" onclick="pasteLastImport()">Wklej zamiast [*]</button>
+    <button type="button" onclick="pasteLastImport()">Wstaw cytowanie</button>
     <p class="hint">
-      Zamienia pierwszy <strong>[*]</strong> lub <strong>[identyfikator]</strong> w dokumencie na cytowanie.
-      Cytowanie jest śledzone — po zmianie stylu użyj „Odśwież cytowania w tekście” (zakładka Literatura).
-      Pełne cytowania Zotero: menu <strong>Zotero → Dodaj/edytuj cytowanie</strong>.
+      Cytowanie trafia w miejsce kursora (albo zamiast <strong>[*]</strong> — zależnie od trybu w zakładce Cytowania)
+      i zostaje <strong>śledzone</strong>: zmiana stylu przelicza je razem z bibliografią.
+      Śledzenie przeżywa zamknięcie dokumentu, kopiowanie tekstu i kopię pliku.
     </p>
   </div>
 
@@ -230,6 +281,9 @@
   </div>
 
   <script>
+    // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
+    var SIDEBAR_VERSION = '2.0.0';
+
     var lastImport = { doi: '', orcid: '', itemKey: '', citationText: '', identifiers: null };
     var duplicateItem = null;
     var appState = {
@@ -240,8 +294,36 @@
       configuredStudies: 0,
       bibliographyStyles: [],
       bibliographyStyle: 'apa',
-      bibliographyCitedOnly: true,
+      wholeCollection: false,
+      insertMode: 'cursor',
+      citationSummary: { citation_count: 0, item_count: 0, has_bibliography: false },
     };
+
+    function checkAddonVersion() {
+      google.script.run
+        .withSuccessHandler(function (serverVersion) {
+          var el = document.getElementById('version-warning');
+          if (!el) return;
+          if (serverVersion && serverVersion !== SIDEBAR_VERSION) {
+            el.style.display = 'block';
+            el.innerHTML =
+              '<strong>Niezgodne wersje plików.</strong> Code.gs ma wersję ' + serverVersion +
+              ', a Sidebar.html ' + SIDEBAR_VERSION + '. Skopiuj do Apps Script <em>oba</em> pliki ' +
+              'z repozytorium i odśwież dokument — inaczej część funkcji nie zadziała.';
+          } else {
+            el.style.display = 'none';
+          }
+        })
+        .withFailureHandler(function () {
+          var el = document.getElementById('version-warning');
+          if (!el) return;
+          el.style.display = 'block';
+          el.innerHTML =
+            '<strong>Stary Code.gs.</strong> Skrypt nie zna funkcji getAddonVersion() — ' +
+            'skopiuj do Apps Script aktualny Code.gs z repozytorium.';
+        })
+        .getAddonVersion();
+    }
 
     function updateCollectionsSourceHint(source) {
       appState.collectionsSource = source || '';
@@ -372,23 +454,35 @@
         return;
       }
       setPasteButtonsDisabled(true);
-      setStatus('Szukam [*] w dokumencie…', false);
+      setStatus(
+        appState.insertMode === 'placeholder'
+          ? 'Szukam [*] w dokumencie…'
+          : 'Wstawiam cytowanie w miejscu kursora…',
+        false
+      );
       google.script.run
         .withSuccessHandler(function (r) {
           setPasteButtonsDisabled(false);
           var cite = (r && r.citation_text) || knownCitationText || '';
-          showPasteFeedback('Zamieniono na ' + cite, false);
+          var msg = 'Wstawiono cytowanie ' + cite;
+          if (r && r.cited_count) {
+            msg += ' (śledzonych pozycji: ' + r.cited_count + ')';
+          }
+          if (r && r.bibliography_refreshed) {
+            msg += '. Bibliografia odświeżona.';
+          }
+          if (r && r.restyle_error) {
+            msg += '\n⚠ ' + r.restyle_error;
+          }
+          showPasteFeedback(msg, false);
           hideDuplicateOffer();
+          loadCitationSummary();
         })
         .withFailureHandler(function (e) {
           setPasteButtonsDisabled(false);
-          var msg = formatScriptError(e);
-          if (/brak \[\*\]|placeholder/i.test(msg)) {
-            msg = 'Brak [*] — wpisz placeholder w dokumencie i spróbuj ponownie.';
-          }
-          showPasteFeedback(msg, true);
+          showPasteFeedback(formatScriptError(e), true);
         })
-        .pasteCitationForItem(itemKey, identifiers || {});
+        .insertCitationForItem(itemKey, identifiers || {}, appState.insertMode);
     }
 
     function truncateTitle(title, max) {
@@ -420,7 +514,7 @@
 
         var btn = document.createElement('button');
         btn.type = 'button';
-        btn.textContent = 'Wklej zamiast [*]';
+        btn.textContent = 'Wstaw cytowanie';
         btn.onclick = (function (it) {
           return function () {
             var key = it.key || it.item_key || '';
@@ -505,11 +599,13 @@
     function setBibliographyEnabled(enabled) {
       var styleSel = document.getElementById('biblio-style');
       var hasStyles = appState.bibliographyStyles.length > 0;
-      document.getElementById('btn-insert-biblio').disabled = !enabled;
-      document.getElementById('btn-refresh-biblio').disabled = !enabled;
-      document.getElementById('btn-refresh-citations').disabled = !enabled;
+      // Cytowania i styl działają bez domyślnej kolekcji — kolekcji wymaga tylko import
+      // i tryb awaryjny „cała kolekcja”.
+      document.getElementById('btn-insert-biblio').disabled = false;
+      document.getElementById('btn-refresh-biblio').disabled = false;
+      document.getElementById('btn-apply-style').disabled = !hasStyles;
       if (styleSel) {
-        styleSel.disabled = !enabled || !hasStyles;
+        styleSel.disabled = !hasStyles;
       }
     }
 
@@ -535,44 +631,112 @@
         }
         sel.appendChild(opt);
       });
-      sel.disabled = !appState.defaultCollection.key;
+      sel.disabled = false;
+      // Sam wybór stylu nic nie przelicza — robi to dopiero „Zmień styl”,
+      // żeby przypadkowe kliknięcie nie przepisało całego dokumentu.
       sel.onchange = function () {
         var styleId = sel.value;
-        if (!styleId) return;
-        persistBibliographyStyle(styleId);
-        doRefreshInTextCitations(true);
+        if (styleId) persistBibliographyStyle(styleId);
       };
     }
 
-    function loadBibliographyCitedOnly() {
-      var cb = document.getElementById('biblio-cited-only');
-      if (!cb) return;
+    function loadDocumentPreferences() {
       google.script.run
         .withSuccessHandler(function (enabled) {
-          appState.bibliographyCitedOnly = enabled !== false;
-          cb.checked = appState.bibliographyCitedOnly;
+          // getBibliographyCitedOnly() === false oznacza zapisany tryb „cała kolekcja”.
+          appState.wholeCollection = enabled === false;
+          var cb = document.getElementById('biblio-whole-collection');
+          if (cb) cb.checked = appState.wholeCollection;
+          if (appState.wholeCollection) {
+            var block = document.getElementById('whole-collection-block');
+            if (block) block.open = true;
+          }
         })
-        .withFailureHandler(function () {
-          cb.checked = appState.bibliographyCitedOnly;
-        })
+        .withFailureHandler(function () {})
         .getBibliographyCitedOnly();
-      cb.onchange = function () {
-        appState.bibliographyCitedOnly = !!cb.checked;
-        google.script.run
-          .withFailureHandler(function () {})
-          .saveBibliographyCitedOnly(appState.bibliographyCitedOnly);
-      };
+
+      google.script.run
+        .withSuccessHandler(function (mode) {
+          appState.insertMode = mode === 'placeholder' ? 'placeholder' : 'cursor';
+          var sel = document.getElementById('insert-mode');
+          if (sel) sel.value = appState.insertMode;
+        })
+        .withFailureHandler(function () {})
+        .getCitationInsertMode();
     }
 
-    function getBibliographyCitedOnlyOption() {
-      var cb = document.getElementById('biblio-cited-only');
-      return cb ? !!cb.checked : appState.bibliographyCitedOnly;
+    function persistWholeCollection() {
+      var cb = document.getElementById('biblio-whole-collection');
+      appState.wholeCollection = cb ? !!cb.checked : false;
+      google.script.run
+        .withFailureHandler(function () {})
+        .saveBibliographyCitedOnly(!appState.wholeCollection);
+    }
+
+    function persistInsertMode() {
+      var sel = document.getElementById('insert-mode');
+      appState.insertMode = sel && sel.value === 'placeholder' ? 'placeholder' : 'cursor';
+      google.script.run
+        .withFailureHandler(function () {})
+        .saveCitationInsertMode(appState.insertMode);
+    }
+
+    function isWholeCollectionMode() {
+      var cb = document.getElementById('biblio-whole-collection');
+      return cb ? !!cb.checked : appState.wholeCollection;
+    }
+
+    function renderCitationSummary(summary) {
+      var el = document.getElementById('citation-summary');
+      if (!el) return;
+      appState.citationSummary = summary || { citation_count: 0, item_count: 0 };
+      var count = appState.citationSummary.citation_count || 0;
+      if (!count) {
+        el.innerHTML =
+          '<strong>Brak cytowań w dokumencie.</strong> Zaimportuj DOI i kliknij „Wstaw cytowanie”, ' +
+          'albo wstaw pozycję z listy w zakładce DOI.';
+        return;
+      }
+      el.innerHTML =
+        '<strong>Śledzone cytowania: ' + count + '</strong> (' +
+        (appState.citationSummary.item_count || 0) + ' unikalnych pozycji).<br>' +
+        'Bibliografia w dokumencie: ' +
+        (appState.citationSummary.has_bibliography ? 'jest' : 'brak') + '.';
+    }
+
+    function loadCitationSummary() {
+      google.script.run
+        .withSuccessHandler(function (summary) {
+          renderCitationSummary(summary);
+          if (summary && summary.style) {
+            appState.bibliographyStyle = summary.style;
+            var sel = document.getElementById('biblio-style');
+            if (sel && sel.options.length) sel.value = summary.style;
+          }
+          if (summary && summary.insert_mode) {
+            appState.insertMode = summary.insert_mode;
+            var modeSel = document.getElementById('insert-mode');
+            if (modeSel) modeSel.value = summary.insert_mode;
+          }
+        })
+        .withFailureHandler(function () {
+          var el = document.getElementById('citation-summary');
+          if (el) el.textContent = 'Nie udało się odczytać cytowań z dokumentu.';
+        })
+        .getDocumentCitationSummary();
     }
 
     function bibliographySuccessMessage(r, actionLabel) {
       var count = r.item_count || 0;
-      var scope = r.cited_only ? 'cytowanych pozycji' : 'pozycji z kolekcji';
-      return actionLabel + ' bibliografię (' + count + ' ' + scope + ', ' + (r.style_label || '') + ').';
+      var scope = r.cited_only ? 'cytowanych pozycji' : 'pozycji z CAŁEJ kolekcji';
+      var msg = actionLabel + ' bibliografię (' + count + ' ' + scope + ', ' + (r.style_label || '') + ').';
+      if (r.updated_citations) {
+        msg += ' Przeliczono cytowań w tekście: ' + r.updated_citations + '.';
+      }
+      if (r.missing_item_keys && r.missing_item_keys.length) {
+        msg += '\n⚠ Nie znaleziono w Zotero: ' + r.missing_item_keys.join(', ') + '.';
+      }
+      return msg;
     }
 
     function loadBibliographyStyles() {
@@ -608,84 +772,78 @@
         .saveBibliographyStyle(styleId);
     }
 
-    function doInsertBibliography() {
-      if (!appState.defaultCollection.key) {
-        setStatus('Ustaw domyślną kolekcję w zakładce Ustawienia.', true);
+    function runBibliographyAction(actionName, actionLabel) {
+      var wholeCollection = isWholeCollectionMode();
+      if (wholeCollection && !appState.defaultCollection.key) {
+        setStatus('Tryb „cała kolekcja” wymaga domyślnej kolekcji — ustaw ją w zakładce Ustawienia.', true);
         showTab('settings');
         return;
       }
       var styleId = document.getElementById('biblio-style').value;
       if (styleId) persistBibliographyStyle(styleId);
-      var citedOnly = getBibliographyCitedOnlyOption();
       setBibliographyButtonsDisabled(true);
-      setStatus(citedOnly ? 'Generuję bibliografię cytowanych pozycji…' : 'Generuję bibliografię całej kolekcji…');
-      google.script.run
+      setStatus(
+        wholeCollection
+          ? 'Generuję bibliografię CAŁEJ kolekcji…'
+          : 'Generuję bibliografię z cytowań w dokumencie…'
+      );
+      var runner = google.script.run
         .withSuccessHandler(function (r) {
           setBibliographyButtonsDisabled(false);
-          var msg = bibliographySuccessMessage(r, 'Wstawiono');
+          var msg = bibliographySuccessMessage(r, actionLabel);
           setStatus(msg, false);
           google.script.run.showPasteAlert(msg, false);
+          loadCitationSummary();
         })
         .withFailureHandler(function (e) {
           setBibliographyButtonsDisabled(false);
           var msg = formatScriptError(e);
           setStatus(msg, true);
           google.script.run.showPasteAlert(msg, true);
-        })
-        .insertBibliography(citedOnly);
+          loadCitationSummary();
+        });
+      runner[actionName](!wholeCollection);
     }
 
-    function doRefreshInTextCitations(silent) {
-      if (!appState.defaultCollection.key) {
-        if (!silent) {
-          setStatus('Ustaw domyślną kolekcję w zakładce Ustawienia.', true);
-          showTab('settings');
-        }
-        return;
-      }
-      var styleId = document.getElementById('biblio-style').value;
-      if (styleId) persistBibliographyStyle(styleId);
-      setCitationButtonsDisabled(true);
-      if (!silent) setStatus('Odświeżam cytowania w tekście…');
-      google.script.run
-        .withSuccessHandler(function (r) {
-          setCitationButtonsDisabled(false);
-          if (r.message && !r.updated) {
-            if (!silent) setStatus(r.message, false);
-            return;
-          }
-          var msg = 'Odświeżono ' + (r.updated || 0) + ' cytowań (styl: ' + (r.style || '') + ').';
-          if (r.skipped) msg += ' Pominięto: ' + r.skipped + '.';
-          if (r.errors && r.errors.length) msg += '\nBłędy: ' + r.errors.join('; ');
-          if (!silent) {
-            setStatus(msg, !!(r.errors && r.errors.length));
-            google.script.run.showPasteAlert(msg, !!(r.errors && r.errors.length));
-          }
-        })
-        .withFailureHandler(function (e) {
-          setCitationButtonsDisabled(false);
-          if (!silent) setStatus(formatScriptError(e), true);
-        })
-        .refreshInTextCitations();
+    function doInsertBibliography() {
+      runBibliographyAction('insertBibliography', 'Wstawiono');
     }
 
     function doRefreshBibliography() {
-      if (!appState.defaultCollection.key) {
-        setStatus('Ustaw domyślną kolekcję w zakładce Ustawienia.', true);
-        showTab('settings');
+      runBibliographyAction('refreshBibliography', 'Odświeżono');
+    }
+
+    function doApplyStyle() {
+      var styleId = document.getElementById('biblio-style').value;
+      if (!styleId) {
+        setStatus('Wybierz styl z listy.', true);
         return;
       }
-      var styleId = document.getElementById('biblio-style').value;
-      if (styleId) persistBibliographyStyle(styleId);
-      var citedOnly = getBibliographyCitedOnlyOption();
       setBibliographyButtonsDisabled(true);
-      setStatus(citedOnly ? 'Odświeżam bibliografię cytowanych pozycji…' : 'Odświeżam bibliografię całej kolekcji…');
+      setStatus('Przeliczam cytowania i bibliografię w stylu ' + styleId + '…');
       google.script.run
         .withSuccessHandler(function (r) {
           setBibliographyButtonsDisabled(false);
-          var msg = bibliographySuccessMessage(r, 'Odświeżono');
+          appState.bibliographyStyle = r.style || styleId;
+          if (!r.cited_count) {
+            setStatus(r.message || 'Brak cytowań w dokumencie.', true);
+            loadCitationSummary();
+            return;
+          }
+          var msg =
+            'Styl: ' + (r.style_label || r.style) + '. Cytowań przeliczonych: ' + (r.updated || 0) +
+            ' z ' + (r.cited_count || 0) + '.';
+          if (r.bibliography) {
+            msg += ' Bibliografia: ' + (r.bibliography.item_count || 0) + ' pozycji.';
+          } else if (r.bibliography_error) {
+            msg += '\n⚠ Bibliografia: ' + r.bibliography_error;
+          }
+          if (r.missing_item_keys && r.missing_item_keys.length) {
+            msg += '\n⚠ Nie znaleziono w Zotero: ' + r.missing_item_keys.join(', ') + '.';
+          }
           setStatus(msg, false);
           google.script.run.showPasteAlert(msg, false);
+          loadCitationSummary();
         })
         .withFailureHandler(function (e) {
           setBibliographyButtonsDisabled(false);
@@ -693,18 +851,22 @@
           setStatus(msg, true);
           google.script.run.showPasteAlert(msg, true);
         })
-        .refreshBibliography(citedOnly);
+        .applyCitationStyle(styleId, {});
+    }
+
+    function doRefreshCitationList() {
+      setStatus('Skanuję dokument w poszukiwaniu cytowań…');
+      loadCitationSummary();
+      setStatus('Lista cytowań odświeżona.', false);
     }
 
     function setBibliographyButtonsDisabled(disabled) {
-      document.getElementById('btn-insert-biblio').disabled = !!disabled || !appState.defaultCollection.key;
-      document.getElementById('btn-refresh-biblio').disabled = !!disabled || !appState.defaultCollection.key;
-      setCitationButtonsDisabled(disabled);
-    }
-
-    function setCitationButtonsDisabled(disabled) {
-      var btn = document.getElementById('btn-refresh-citations');
-      if (btn) btn.disabled = !!disabled || !appState.defaultCollection.key;
+      ['btn-insert-biblio', 'btn-refresh-biblio', 'btn-apply-style', 'btn-refresh-citations'].forEach(
+        function (id) {
+          var btn = document.getElementById(id);
+          if (btn) btn.disabled = !!disabled;
+        }
+      );
     }
 
     function updateCurrentCollectionLabels() {
@@ -997,11 +1159,13 @@
 
     function boot() {
       setStatus('Ładowanie…');
+      checkAddonVersion();
       loadDefaultCollection();
       loadCollections();
       loadStudiesOptional();
       loadBibliographyStyles();
-      loadBibliographyCitedOnly();
+      loadDocumentPreferences();
+      loadCitationSummary();
       loadStudyOverview();
       setStatus('Wybierz domyślną kolekcję w Ustawieniach (jednorazowo).');
     }

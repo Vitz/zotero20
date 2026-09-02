@@ -4,14 +4,28 @@
  */
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
+// Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
+const ADDON_VERSION = '2.0.0';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
 const PROP_BIBLIOGRAPHY_CITED_ONLY = 'ZOTERO20_BIBLIOGRAPHY_CITED_ONLY';
+const PROP_CITATION_INSERT_MODE = 'ZOTERO20_CITATION_INSERT_MODE';
 const NAMED_RANGE_BIBLIOGRAPHY = 'ZOTERO20_BIBLIOGRAPHY';
+const BIBLIOGRAPHY_HEADING = 'Bibliografia';
+
+/**
+ * Kotwica cytowania = ukryty link na tekście cytowania.
+ * W przeciwieństwie do NamedRange link przeżywa kopiuj/wklej, cofnięcie zmian,
+ * zamknięcie dokumentu i zrobienie kopii pliku — to najbliższy odpowiednik
+ * pól Zotero, jaki daje Apps Script.
+ */
+const CITE_LINK_BASE = 'https://zotero.keyweb.pl/cite/';
+
+// Stara ścieżka (NamedRange + rejestr w DocumentProperties) — tylko do jednorazowej migracji.
 const NAMED_RANGE_CITE_PREFIX = 'ZOTERO20_CITE_';
 const PROP_CITATION_RANGES = 'ZOTERO20_CITATION_RANGES';
-const BIBLIOGRAPHY_HEADING = 'Bibliografia';
+const PROP_LEGACY_MIGRATED = 'ZOTERO20_LEGACY_RANGES_MIGRATED';
 
 function onOpen() {
   DocumentApp.getUi()
@@ -71,12 +85,14 @@ function importDoi(doi, options) {
   var citationText = result.citation_text || '';
   if (!citationText && itemKey) {
     try {
-      citationText = getItemCitationText(itemKey);
+      citationText = getItemCitationText(itemKey, getBibliographyStyle());
     } catch (e) {
       citationText = '';
     }
   }
-  if (citationText && !result.duplicate) {
+  // Automatyczna podmiana [*] tylko w trybie placeholderowym — w trybie kursora
+  // import nie powinien nic wstawiać do dokumentu bez decyzji użytkownika.
+  if (citationText && !result.duplicate && getCitationInsertMode() === 'placeholder') {
     try {
       replacePlaceholderInDocument_(citationText, buildIdentifiers_('doi', result.doi || doi), itemKey);
       result.placeholder_replaced = true;
@@ -116,18 +132,46 @@ function getBibliographyStyles() {
   return apiGet('/styles');
 }
 
+function getAddonVersion() {
+  return ADDON_VERSION;
+}
+
+/** Styl jest wspólny dla cytowań w tekście i bibliografii — jedno źródło prawdy na dokument. */
 function getBibliographyStyle() {
-  var props = PropertiesService.getScriptProperties();
-  return props.getProperty(PROP_BIBLIOGRAPHY_STYLE) || 'apa';
+  var docProps = PropertiesService.getDocumentProperties();
+  var style = docProps.getProperty(PROP_BIBLIOGRAPHY_STYLE);
+  if (style) {
+    return style;
+  }
+  // Wcześniej styl był globalny (ScriptProperties) i „przeciekał” między dokumentami.
+  var legacy = PropertiesService.getScriptProperties().getProperty(PROP_BIBLIOGRAPHY_STYLE);
+  if (legacy) {
+    docProps.setProperty(PROP_BIBLIOGRAPHY_STYLE, legacy);
+    return legacy;
+  }
+  return 'apa';
 }
 
 function saveBibliographyStyle(styleId) {
   styleId = String(styleId || '').trim();
   if (!styleId) {
-    throw new Error('Wybierz styl bibliografii.');
+    throw new Error('Wybierz styl cytowań.');
   }
-  PropertiesService.getScriptProperties().setProperty(PROP_BIBLIOGRAPHY_STYLE, styleId);
+  PropertiesService.getDocumentProperties().setProperty(PROP_BIBLIOGRAPHY_STYLE, styleId);
   return getBibliographyStyle();
+}
+
+function getCitationInsertMode() {
+  var mode = PropertiesService.getDocumentProperties().getProperty(PROP_CITATION_INSERT_MODE);
+  return mode === 'placeholder' ? 'placeholder' : 'cursor';
+}
+
+function saveCitationInsertMode(mode) {
+  PropertiesService.getDocumentProperties().setProperty(
+    PROP_CITATION_INSERT_MODE,
+    mode === 'placeholder' ? 'placeholder' : 'cursor'
+  );
+  return getCitationInsertMode();
 }
 
 function getBibliographyCitedOnly() {
@@ -146,58 +190,87 @@ function saveBibliographyCitedOnly(enabled) {
   return getBibliographyCitedOnly();
 }
 
-function refreshInTextCitations() {
-  return refreshInTextCitations_();
-}
-
-function refreshInTextCitations_() {
+/**
+ * Zmiana stylu w jednym kroku: przelicza wszystkie cytowania w tekście
+ * i bibliografię z tej samej odpowiedzi serwera, więc numeracja i format
+ * nie mogą się rozjechać.
+ */
+function applyCitationStyle(styleId, options) {
+  options = options || {};
+  if (styleId) {
+    saveBibliographyStyle(styleId);
+  }
   var style = getBibliographyStyle();
-  var doc = DocumentApp.getActiveDocument();
-  var entries = loadCitationRanges_();
-  if (!entries.length) {
+  var citations = getTrackedCitations_();
+
+  if (!citations.length) {
     return {
-      updated: 0,
-      skipped: 0,
-      errors: [],
       style: style,
-      message: 'Brak śledzonych cytowań w dokumencie (wstaw przez [*] z panelu).',
+      cited_count: 0,
+      updated: 0,
+      bibliography: null,
+      message:
+        'Brak śledzonych cytowań w dokumencie. Wstaw cytowanie przyciskiem „Wstaw cytowanie” ' +
+        '— dopiero wtedy styl i bibliografia mają co przeliczać.',
     };
   }
 
-  var updated = 0;
-  var skipped = 0;
-  var errors = [];
-  var stillValid = [];
+  var data = fetchDocumentCitations_(citations, style);
+  var updated = rewriteCitationRuns_(citations, data.citation_by_key);
 
-  for (var i = 0; i < entries.length; i++) {
-    var entry = entries[i];
-    var named = doc.getNamedRanges(entry.name);
-    if (!named || !named.length) {
-      skipped++;
-      continue;
-    }
-
+  var bibliography = null;
+  var bibliographyError = '';
+  if (options.skipBibliography) {
+    bibliography = null;
+  } else if (!data.entries.length) {
+    bibliographyError = 'Serwer nie zwrócił wpisów bibliografii dla cytowanych pozycji.';
+  } else {
     try {
-      var newText = getItemCitationText(entry.item_key, style);
-      if (updateCitationNamedRange_(named[0], entry.name, newText)) {
-        updated++;
-        stillValid.push(entry);
-      } else {
-        skipped++;
-      }
+      // Bibliografia dopisywana jest tylko, gdy już istnieje albo user o nią prosi.
+      var mustExist = !options.createBibliography;
+      bibliography = writeBibliographyToDocument_(data.entries, data.style_label, mustExist);
     } catch (e) {
-      errors.push(entry.item_key + ': ' + (e.message || String(e)));
-      stillValid.push(entry);
+      bibliographyError = e.message || String(e);
     }
   }
 
-  saveCitationRanges_(stillValid);
-
   return {
-    updated: updated,
-    skipped: skipped,
-    errors: errors,
-    style: style,
+    style: data.style,
+    style_label: data.style_label,
+    numeric: !!data.numeric,
+    cited_count: data.item_keys.length,
+    updated: updated.updated,
+    unchanged: updated.unchanged,
+    skipped: updated.skipped,
+    missing_item_keys: data.missing_item_keys,
+    bibliography: bibliography,
+    bibliography_error: bibliographyError,
+  };
+}
+
+/** Zgodność wstecz z poprzednią wersją sidebara. */
+function refreshInTextCitations() {
+  var result = applyCitationStyle('', { skipBibliography: true });
+  return {
+    updated: result.updated || 0,
+    skipped: result.skipped || 0,
+    errors: [],
+    style: result.style,
+    message: result.message || '',
+  };
+}
+
+function getDocumentCitationSummary() {
+  var citations = getTrackedCitations_();
+  var keys = uniqueItemKeys_(citations);
+  return {
+    style: getBibliographyStyle(),
+    insert_mode: getCitationInsertMode(),
+    citation_count: citations.length,
+    item_count: keys.length,
+    item_keys: keys,
+    has_bibliography: hasBibliographySection_(),
+    version: ADDON_VERSION,
   };
 }
 
@@ -216,59 +289,100 @@ function upsertBibliography_(isRefresh, citedOnly) {
     citedOnly = !!citedOnly;
   }
 
-  var collection = getDefaultCollection();
-  if (!collection.key) {
-    throw new Error('Ustaw domyślną kolekcję w zakładce Ustawienia.');
-  }
   var style = getBibliographyStyle();
-  var payload = { style: style };
-  var citedKeys = [];
 
   if (citedOnly) {
-    citedKeys = collectCitedItemKeysInDocumentOrder_();
-    if (!citedKeys.length) {
+    var result = applyCitationStyle(style, { createBibliography: !isRefresh });
+    if (!result.cited_count) {
+      // Świadomie bez fallbacku na całą kolekcję — to był najgorszy błąd poprzedniej wersji.
       throw new Error(
-        'Brak śledzonych cytowań w dokumencie — wstaw cytowania przez [*] (import DOI → „Wklej zamiast [*]”) ' +
-        'lub odznacz „Tylko cytowane w dokumencie”, aby wstawić całą kolekcję.'
+        'Brak cytowań w dokumencie, więc nie ma z czego zbudować bibliografii. ' +
+        'Wstaw cytowania przyciskiem „Wstaw cytowanie”, albo zaznacz „Wstaw CAŁĄ kolekcję”, ' +
+        'jeśli naprawdę chcesz wszystkie pozycje z kolekcji.'
       );
     }
-    payload.item_keys = citedKeys;
-  } else {
-    payload.collection_key = collection.key;
+    if (result.bibliography_error) {
+      throw new Error(result.bibliography_error);
+    }
+    return {
+      inserted: result.bibliography ? result.bibliography.inserted : false,
+      refreshed: result.bibliography ? result.bibliography.refreshed : false,
+      style: result.style,
+      style_label: result.style_label,
+      item_count: result.bibliography ? result.bibliography.item_count : 0,
+      cited_only: true,
+      cited_count: result.cited_count,
+      updated_citations: result.updated,
+      missing_item_keys: result.missing_item_keys,
+    };
   }
 
-  var data = apiPost('/bibliography', payload);
-  var entries = (data.entries || [])
-    .map(function (e) { return String(e).trim(); })
-    .filter(function (e) { return e; });
-  if (!entries.length) {
-    var hint = (data.item_count || 0) > 0
-      ? 'Zotero zwróciło pustą bibliografię mimo pozycji w kolekcji — spróbuj inny styl lub odśwież po chwili.'
-      : 'Kolekcja jest pusta — brak pozycji do bibliografii.';
-    throw new Error(hint);
+  var collection = getDefaultCollection();
+  if (!collection.key) {
+    throw new Error('Tryb „cała kolekcja” wymaga domyślnej kolekcji — ustaw ją w zakładce Ustawienia.');
   }
-  var result = writeBibliographyToDocument_(entries, data.style_label || style, isRefresh);
-  result.collection_key = collection.key;
-  result.collection_name = collection.name;
-  result.style = data.style || style;
-  result.style_label = data.style_label || style;
-  result.item_count = data.item_count || entries.length;
-  result.cited_only = citedOnly;
-  result.cited_count = citedKeys.length || (data.item_keys && data.item_keys.length) || 0;
-  return result;
+
+  var data = apiPost('/bibliography', { style: style, collection_key: collection.key });
+  var entries = normalizeEntries_(data.entries);
+  if (!entries.length) {
+    throw new Error(
+      (data.item_count || 0) > 0
+        ? 'Zotero zwróciło pustą bibliografię mimo pozycji w kolekcji — spróbuj inny styl lub odśwież za chwilę.'
+        : 'Kolekcja jest pusta — brak pozycji do bibliografii.'
+    );
+  }
+
+  var written = writeBibliographyToDocument_(entries, data.style_label || style, isRefresh);
+  written.collection_key = collection.key;
+  written.collection_name = collection.name;
+  written.style = data.style || style;
+  written.style_label = data.style_label || style;
+  written.cited_only = false;
+  written.cited_count = 0;
+  return written;
+}
+
+function normalizeEntries_(entries) {
+  return (entries || [])
+    .map(function (entry) { return String(entry).trim(); })
+    .filter(function (entry) { return entry; });
+}
+
+/** Jedno żądanie zwraca i cytowania w tekście, i wpisy bibliografii dla tego samego stylu. */
+function fetchDocumentCitations_(citations, style) {
+  var keys = uniqueItemKeys_(citations);
+  var data = apiPost('/citations', { style: style, item_keys: keys });
+  var byKey = {};
+  var list = data.citations || [];
+  for (var i = 0; i < list.length; i++) {
+    var text = String(list[i].citation_text || '').trim();
+    if (list[i].item_key && text) {
+      byKey[list[i].item_key] = text;
+    }
+  }
+  return {
+    citation_by_key: byKey,
+    entries: normalizeEntries_(data.entries),
+    style: data.style || style,
+    style_label: data.style_label || style,
+    numeric: !!data.numeric,
+    item_keys: data.item_keys || keys,
+    missing_item_keys: data.missing_item_keys || [],
+  };
 }
 
 /**
  * Wstawia lub odświeża sekcję bibliografii na końcu dokumentu.
- * Zakres oznaczony NamedRange ZOTERO20_BIBLIOGRAPHY (nagłówek + wpisy).
+ * Zakres oznaczony NamedRange ZOTERO20_BIBLIOGRAPHY, z awaryjnym
+ * wyszukiwaniem po nagłówku (NamedRange bywa gubiony przy edycji).
  */
-function writeBibliographyToDocument_(entries, styleLabel, isRefresh) {
+function writeBibliographyToDocument_(entries, styleLabel, mustExist) {
   var doc = DocumentApp.getActiveDocument();
   var body = doc.getBody();
   var hadExisting = removeBibliographySection_(doc, body);
 
-  if (isRefresh && !hadExisting) {
-    throw new Error('Brak bibliografii w dokumencie — użyj „Wstaw literaturę”.');
+  if (mustExist && !hadExisting) {
+    throw new Error('Brak bibliografii w dokumencie — użyj „Wstaw bibliografię”.');
   }
 
   body.appendParagraph(BIBLIOGRAPHY_HEADING).setHeading(DocumentApp.ParagraphHeading.HEADING1);
@@ -302,34 +416,79 @@ function writeBibliographyToDocument_(entries, styleLabel, isRefresh) {
   };
 }
 
-function removeBibliographySection_(doc, body) {
-  var named = doc.getNamedRanges(NAMED_RANGE_BIBLIOGRAPHY);
-  if (!named || !named.length) {
-    return false;
+function hasBibliographySection_() {
+  var doc = DocumentApp.getActiveDocument();
+  if (doc.getNamedRanges(NAMED_RANGE_BIBLIOGRAPHY).length) {
+    return true;
   }
+  return findBibliographyHeadingIndex_(doc.getBody()) >= 0;
+}
 
-  var range = named[0].getRange();
-  var elements = range.getRangeElements();
-  var seen = {};
-  for (var i = 0; i < elements.length; i++) {
-    var element = elements[i].getElement();
-    if (!element || !element.getParent) {
+function findBibliographyHeadingIndex_(body) {
+  var wanted = BIBLIOGRAPHY_HEADING.toLowerCase();
+  for (var i = 0; i < body.getNumChildren(); i++) {
+    var child = body.getChild(i);
+    if (child.getType() !== DocumentApp.ElementType.PARAGRAPH) {
       continue;
     }
-    var parent = element.getParent();
-    if (parent && parent.getType && parent.getType() === DocumentApp.ElementType.BODY) {
-      var idx = parent.getChildIndex(element);
-      if (idx >= 0) {
-        seen[idx] = element;
+    var paragraph = child.asParagraph();
+    if (
+      paragraph.getHeading() === DocumentApp.ParagraphHeading.HEADING1 &&
+      paragraph.getText().trim().toLowerCase() === wanted
+    ) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function removeBibliographySection_(doc, body) {
+  var named = doc.getNamedRanges(NAMED_RANGE_BIBLIOGRAPHY);
+  var indices = [];
+
+  if (named && named.length) {
+    var seen = {};
+    for (var n = 0; n < named.length; n++) {
+      var elements = named[n].getRange().getRangeElements();
+      for (var i = 0; i < elements.length; i++) {
+        var element = elements[i].getElement();
+        if (!element || !element.getParent) {
+          continue;
+        }
+        var parent = element.getParent();
+        if (parent && parent.getType && parent.getType() === DocumentApp.ElementType.BODY) {
+          var idx = parent.getChildIndex(element);
+          if (idx >= 0) {
+            seen[idx] = true;
+          }
+        }
       }
+      named[n].remove();
+    }
+    indices = Object.keys(seen).map(function (k) { return parseInt(k, 10); });
+  }
+
+  if (!indices.length) {
+    // Awaryjnie: sekcja bibliografii to nagłówek „Bibliografia” i wszystko po nim
+    // (panel zawsze dopisuje ją na końcu dokumentu).
+    var headingIdx = findBibliographyHeadingIndex_(body);
+    if (headingIdx < 0) {
+      return false;
+    }
+    for (var k = headingIdx; k < body.getNumChildren(); k++) {
+      indices.push(k);
     }
   }
 
-  named[0].remove();
-
-  var indices = Object.keys(seen).map(function (k) { return parseInt(k, 10); });
   indices.sort(function (a, b) { return b - a; });
   for (var j = 0; j < indices.length; j++) {
+    if (indices[j] >= body.getNumChildren()) {
+      continue;
+    }
+    // Dokument musi mieć co najmniej jeden akapit — inaczej Docs rzuca wyjątkiem.
+    if (body.getNumChildren() <= 1) {
+      body.appendParagraph('');
+    }
     body.getChild(indices[j]).removeFromParent();
   }
 
@@ -355,22 +514,60 @@ function getItemCitationText(itemKey, style) {
   return formatCitationText_(data.item || {});
 }
 
-function pasteCitationForItem(itemKey, identifiers) {
+/**
+ * Wstawia śledzone cytowanie: w miejscu kursora (domyślnie) albo zamiast [*].
+ * Po wstawieniu przelicza cały dokument, żeby numeracja stylów numerycznych
+ * i bibliografia pozostały spójne — tak jak robi to wtyczka Zotero.
+ */
+function insertCitationForItem(itemKey, identifiers, mode) {
   var key = String(itemKey || '').trim();
   if (!key) {
     throw new Error('Brak klucza pozycji — zaimportuj DOI ponownie lub wybierz pozycję z listy.');
   }
+
+  var style = getBibliographyStyle();
   var citationText = '';
   try {
-    citationText = getItemCitationText(key);
+    citationText = getItemCitationText(key, style);
   } catch (e) {
     throw new Error('Nie udało się pobrać cytowania: ' + (e.message || String(e)));
   }
   if (!citationText) {
     throw new Error('Brak tekstu cytowania dla pozycji ' + key + '.');
   }
-  replacePlaceholderInDocument_(citationText, identifiers || {}, key);
-  return { replaced: true, citation_text: citationText, item_key: key, tracked: true };
+
+  mode = mode === 'placeholder' || mode === 'cursor' ? mode : getCitationInsertMode();
+  var placement =
+    mode === 'placeholder'
+      ? replacePlaceholderInDocument_(citationText, identifiers || {}, key)
+      : insertCitationAtCursor_(citationText, key);
+
+  var result = {
+    replaced: true,
+    tracked: true,
+    item_key: key,
+    citation_text: citationText,
+    mode: placement.mode,
+  };
+
+  try {
+    var restyled = applyCitationStyle('', { skipBibliography: !hasBibliographySection_() });
+    result.cited_count = restyled.cited_count;
+    result.numeric = restyled.numeric;
+    result.bibliography_refreshed = !!restyled.bibliography;
+    if (restyled.numeric) {
+      result.citation_text = '[' + restyled.cited_count + ']';
+    }
+  } catch (e) {
+    result.restyle_error = e.message || String(e);
+  }
+
+  return result;
+}
+
+/** Zgodność wstecz z poprzednią wersją sidebara. */
+function pasteCitationForItem(itemKey, identifiers) {
+  return insertCitationForItem(itemKey, identifiers, 'placeholder');
 }
 
 /** Widoczny komunikat w dokumencie (modal) — wywoływany z sidebara po wklejeniu. */
@@ -381,7 +578,7 @@ function showPasteAlert(message, isError) {
 
 /**
  * Zamienia pierwszy placeholder w dokumencie na podany tekst.
- * Gdy podano itemKey, cytowanie jest śledzone (NamedRange) do odświeżania stylu.
+ * Gdy podano itemKey, cytowanie dostaje kotwicę-link i jest dalej śledzone.
  * Kolejność: [*], potem [identyfikator] dopasowany do importu.
  */
 function replacePlaceholderInDocument_(text, identifiers, itemKey) {
@@ -393,15 +590,261 @@ function replacePlaceholderInDocument_(text, identifiers, itemKey) {
     var result = replaceFirstLiteral_(body, patterns[i], text);
     if (result) {
       if (itemKey) {
-        registerTrackedCitation_(result.textElement, result.start, result.end, itemKey);
+        applyCitationLink_(result.textElement, result.start, result.end, itemKey, newCitationId_());
       }
-      return { pattern: patterns[i], text: text, item_key: itemKey || '' };
+      return { mode: 'placeholder', pattern: patterns[i], text: text, item_key: itemKey || '' };
     }
   }
 
   throw new Error(
-    'Brak [*] — wpisz placeholder w dokumencie (np. [*] lub [DOI]) i spróbuj ponownie.'
+    'Brak [*] — wpisz placeholder w dokumencie (np. [*] lub [DOI]) i spróbuj ponownie, ' +
+    'albo przełącz wstawianie na „w miejscu kursora”.'
   );
+}
+
+/** Wstawia cytowanie tam, gdzie stoi kursor w dokumencie. */
+function insertCitationAtCursor_(text, itemKey) {
+  var doc = DocumentApp.getActiveDocument();
+  var cursor = doc.getCursor();
+  if (!cursor) {
+    throw new Error(
+      'Nie widzę kursora w dokumencie — kliknij w tekst w miejscu cytowania i spróbuj ponownie ' +
+      '(albo przełącz wstawianie na tryb [*]).'
+    );
+  }
+
+  var textElement = cursor.getSurroundingText();
+  if (!textElement) {
+    throw new Error('Ustaw kursor w akapicie tekstu — w tym miejscu nie da się wstawić cytowania.');
+  }
+
+  var offset = cursor.getSurroundingTextOffset();
+  textElement.insertText(offset, text);
+  applyCitationLink_(textElement, offset, offset + text.length - 1, itemKey, newCitationId_());
+  return { mode: 'cursor', text: text, item_key: itemKey };
+}
+
+function newCitationId_() {
+  return Utilities.getUuid().replace(/-/g, '').substring(0, 12);
+}
+
+function buildCitationUrl_(itemKey, citationId) {
+  return (
+    CITE_LINK_BASE +
+    encodeURIComponent(String(itemKey).trim()) +
+    '?c=' +
+    encodeURIComponent(citationId || newCitationId_())
+  );
+}
+
+function parseCitationUrl_(url) {
+  if (!url || String(url).indexOf(CITE_LINK_BASE) !== 0) {
+    return null;
+  }
+  var rest = String(url).substring(CITE_LINK_BASE.length);
+  var parts = rest.split('?');
+  var itemKey = '';
+  try {
+    itemKey = decodeURIComponent(parts[0] || '').trim();
+  } catch (e) {
+    itemKey = (parts[0] || '').trim();
+  }
+  if (!itemKey) {
+    return null;
+  }
+  var citationId = '';
+  if (parts[1]) {
+    var match = /(?:^|&)c=([^&]*)/.exec(parts[1]);
+    if (match) {
+      citationId = match[1];
+    }
+  }
+  return { itemKey: itemKey, citationId: citationId };
+}
+
+/**
+ * Nakłada kotwicę cytowania i zdejmuje domyślny wygląd hiperłącza,
+ * żeby cytowanie w tekście wyglądało jak zwykły tekst.
+ */
+function applyCitationLink_(textElement, start, end, itemKey, citationId) {
+  if (end < start) {
+    return;
+  }
+  textElement.setLinkUrl(start, end, buildCitationUrl_(itemKey, citationId));
+  textElement.setUnderline(start, end, false);
+  textElement.setForegroundColor(start, end, '#000000');
+}
+
+/** Wszystkie cytowania w dokumencie, w kolejności występowania. */
+function getTrackedCitations_() {
+  migrateLegacyNamedRanges_();
+  var runs = [];
+  collectCitationRuns_(DocumentApp.getActiveDocument().getBody(), runs);
+  return runs;
+}
+
+function collectCitationRuns_(container, runs) {
+  var count = container.getNumChildren();
+  for (var i = 0; i < count; i++) {
+    var child = container.getChild(i);
+    var type = child.getType();
+    if (type === DocumentApp.ElementType.PARAGRAPH) {
+      collectRunsFromText_(child.asParagraph().editAsText(), runs);
+    } else if (type === DocumentApp.ElementType.LIST_ITEM) {
+      collectRunsFromText_(child.asListItem().editAsText(), runs);
+    } else if (type === DocumentApp.ElementType.TABLE) {
+      var table = child.asTable();
+      for (var r = 0; r < table.getNumRows(); r++) {
+        var row = table.getRow(r);
+        for (var c = 0; c < row.getNumCells(); c++) {
+          collectCitationRuns_(row.getCell(c), runs);
+        }
+      }
+    }
+  }
+}
+
+function collectRunsFromText_(textElement, runs) {
+  var text = textElement.getText();
+  if (!text) {
+    return;
+  }
+
+  var indices = textElement.getTextAttributeIndices();
+  if (!indices.length || indices[0] !== 0) {
+    indices = [0].concat(indices);
+  }
+
+  var current = null;
+  for (var i = 0; i < indices.length; i++) {
+    var start = indices[i];
+    var end = (i + 1 < indices.length ? indices[i + 1] : text.length) - 1;
+    if (end < start) {
+      continue;
+    }
+
+    var url = textElement.getLinkUrl(start) || '';
+    var meta = parseCitationUrl_(url);
+    if (!meta) {
+      current = null;
+      continue;
+    }
+
+    // Ten sam link rozbity zmianą formatowania (np. pogrubienie) to wciąż jedno cytowanie.
+    if (current && current.url === url && current.end === start - 1) {
+      current.end = end;
+      continue;
+    }
+
+    current = {
+      textElement: textElement,
+      start: start,
+      end: end,
+      url: url,
+      item_key: meta.itemKey,
+      citation_id: meta.citationId,
+    };
+    runs.push(current);
+  }
+}
+
+function uniqueItemKeys_(runs) {
+  var seen = {};
+  var keys = [];
+  for (var i = 0; i < runs.length; i++) {
+    var key = runs[i].item_key;
+    if (!key || seen[key]) {
+      continue;
+    }
+    seen[key] = true;
+    keys.push(key);
+  }
+  return keys;
+}
+
+/**
+ * Podmienia tekst cytowań na nowy. Idzie od końca dokumentu, bo każda zmiana
+ * długości tekstu przesuwa offsety kolejnych cytowań w tym samym akapicie.
+ */
+function rewriteCitationRuns_(runs, citationByKey) {
+  var updated = 0;
+  var unchanged = 0;
+  var skipped = 0;
+
+  for (var i = runs.length - 1; i >= 0; i--) {
+    var run = runs[i];
+    var newText = citationByKey[run.item_key];
+    if (!newText) {
+      skipped++;
+      continue;
+    }
+
+    var currentText = run.textElement.getText().substring(run.start, run.end + 1);
+    if (currentText === newText) {
+      unchanged++;
+      continue;
+    }
+
+    run.textElement.deleteText(run.start, run.end);
+    run.textElement.insertText(run.start, newText);
+    run.end = run.start + newText.length - 1;
+    applyCitationLink_(run.textElement, run.start, run.end, run.item_key, run.citation_id);
+    updated++;
+  }
+
+  return { updated: updated, unchanged: unchanged, skipped: skipped };
+}
+
+/** Jednorazowo przenosi cytowania z NamedRange (wersja 1.x) na kotwice-linki. */
+function migrateLegacyNamedRanges_() {
+  var props = PropertiesService.getDocumentProperties();
+  if (props.getProperty(PROP_LEGACY_MIGRATED) === 'true') {
+    return 0;
+  }
+
+  var doc = DocumentApp.getActiveDocument();
+  var entries = loadLegacyCitationRanges_();
+  var migrated = 0;
+
+  for (var i = 0; i < entries.length; i++) {
+    var itemKey = String(entries[i].item_key || '').trim();
+    var named = itemKey ? doc.getNamedRanges(entries[i].name) : [];
+    for (var n = 0; n < named.length; n++) {
+      try {
+        var elements = named[n].getRange().getRangeElements();
+        for (var e = 0; e < elements.length; e++) {
+          var element = elements[e];
+          if (element.getElement().getType() !== DocumentApp.ElementType.TEXT) {
+            continue;
+          }
+          var textElement = element.getElement().asText();
+          var start = element.isPartial() ? element.getStartOffset() : 0;
+          var end = element.isPartial()
+            ? element.getEndOffsetInclusive()
+            : textElement.getText().length - 1;
+          applyCitationLink_(textElement, start, end, itemKey, newCitationId_());
+          migrated++;
+        }
+      } catch (err) {
+        // Uszkodzony stary zakres pomijamy — link i tak jest źródłem prawdy.
+      }
+      named[n].remove();
+    }
+  }
+
+  props.deleteProperty(PROP_CITATION_RANGES);
+  props.setProperty(PROP_LEGACY_MIGRATED, 'true');
+  return migrated;
+}
+
+function loadLegacyCitationRanges_() {
+  var raw = PropertiesService.getDocumentProperties().getProperty(PROP_CITATION_RANGES) || '[]';
+  try {
+    var entries = JSON.parse(raw);
+    return Array.isArray(entries) ? entries : [];
+  } catch (e) {
+    return [];
+  }
 }
 
 function buildPlaceholderPatterns_(identifiers) {
@@ -461,156 +904,6 @@ function replaceFirstLiteral_(element, searchText, replacementText) {
     start: start,
     end: start + replacementText.length - 1,
   };
-}
-
-function registerTrackedCitation_(textElement, start, end, itemKey) {
-  var doc = DocumentApp.getActiveDocument();
-  var rangeName = allocateCitationRangeName_(doc, itemKey);
-  var rangeBuilder = doc.newRange();
-  rangeBuilder.addElement(textElement, start, end);
-  doc.addNamedRange(rangeName, rangeBuilder.build());
-  rememberCitationRange_(rangeName, itemKey);
-}
-
-function allocateCitationRangeName_(doc, itemKey) {
-  var base = NAMED_RANGE_CITE_PREFIX + String(itemKey).trim();
-  if (!doc.getNamedRanges(base).length) {
-    return base;
-  }
-  var n = 2;
-  while (doc.getNamedRanges(base + '_' + n).length) {
-    n++;
-  }
-  return base + '_' + n;
-}
-
-function rememberCitationRange_(rangeName, itemKey) {
-  var entries = loadCitationRanges_();
-  var filtered = entries.filter(function (e) { return e.name !== rangeName; });
-  filtered.push({
-    name: rangeName,
-    item_key: String(itemKey || '').trim(),
-    at: new Date().toISOString(),
-  });
-  saveCitationRanges_(filtered);
-}
-
-function loadCitationRanges_() {
-  var raw = PropertiesService.getDocumentProperties().getProperty(PROP_CITATION_RANGES) || '[]';
-  try {
-    var entries = JSON.parse(raw);
-    return Array.isArray(entries) ? entries : [];
-  } catch (e) {
-    return [];
-  }
-}
-
-/**
- * Zbiera unikalne item_key cytowań w kolejności pierwszego wystąpienia w dokumencie.
- * Źródło: rejestr PROP_CITATION_RANGES + NamedRanges ZOTERO20_CITE_* (tylko istniejące).
- */
-function collectCitedItemKeysInDocumentOrder_() {
-  var doc = DocumentApp.getActiveDocument();
-  var entries = loadCitationRanges_();
-  var withPosition = [];
-
-  for (var i = 0; i < entries.length; i++) {
-    var entry = entries[i];
-    var itemKey = String(entry.item_key || '').trim();
-    if (!itemKey) {
-      continue;
-    }
-    var named = doc.getNamedRanges(entry.name);
-    if (!named || !named.length) {
-      continue;
-    }
-    var pos = getNamedRangeDocumentPosition_(doc, named[0]);
-    withPosition.push({
-      item_key: itemKey,
-      para: pos.para,
-      offset: pos.offset,
-    });
-  }
-
-  withPosition.sort(function (a, b) {
-    if (a.para !== b.para) {
-      return a.para - b.para;
-    }
-    return a.offset - b.offset;
-  });
-
-  var seen = {};
-  var keys = [];
-  for (var j = 0; j < withPosition.length; j++) {
-    var key = withPosition[j].item_key;
-    if (!key || seen[key]) {
-      continue;
-    }
-    seen[key] = true;
-    keys.push(key);
-  }
-  return keys;
-}
-
-function getNamedRangeDocumentPosition_(doc, namedRange) {
-  var range = namedRange.getRange();
-  var elements = range.getRangeElements();
-  if (!elements.length) {
-    return { para: 2147483647, offset: 2147483647 };
-  }
-
-  var body = doc.getBody();
-  var textEl = elements[0].getElement();
-  var para = textEl.getParent();
-  while (para && para.getType && para.getType() !== DocumentApp.ElementType.PARAGRAPH) {
-    para = para.getParent ? para.getParent() : null;
-  }
-
-  var paraIdx = 2147483647;
-  if (para && para.getType && para.getType() === DocumentApp.ElementType.PARAGRAPH) {
-    try {
-      paraIdx = body.getChildIndex(para);
-    } catch (e) {
-      paraIdx = 2147483647;
-    }
-  }
-
-  return {
-    para: paraIdx,
-    offset: elements[0].getStartOffset(),
-  };
-}
-
-function saveCitationRanges_(entries) {
-  PropertiesService.getDocumentProperties().setProperty(
-    PROP_CITATION_RANGES,
-    JSON.stringify(entries || [])
-  );
-}
-
-function updateCitationNamedRange_(namedRange, rangeName, newText) {
-  var range = namedRange.getRange();
-  var elements = range.getRangeElements();
-  if (!elements.length) {
-    return false;
-  }
-
-  var doc = DocumentApp.getActiveDocument();
-  var textElement = elements[0].getElement().asText();
-  var start = elements[0].getStartOffset();
-  var end = elements[elements.length - 1].getEndOffsetInclusive();
-
-  textElement.deleteText(start, end);
-  textElement.insertText(start, newText);
-
-  namedRange.remove();
-
-  var rangeBuilder = doc.newRange();
-  var newEnd = start + newText.length - 1;
-  rangeBuilder.addElement(textElement, start, newEnd);
-  doc.addNamedRange(rangeName, rangeBuilder.build());
-
-  return true;
 }
 
 function escapeRegexLiteral_(text) {

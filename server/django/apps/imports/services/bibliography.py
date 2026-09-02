@@ -20,6 +20,12 @@ CSL_STYLES: list[dict[str, str]] = [
 
 _STYLE_IDS = {style["id"] for style in CSL_STYLES}
 
+# Style numeryczne: cytowanie w tekście to [1], a bibliografia jest w kolejności cytowania.
+NUMERIC_STYLE_IDS = {"ieee", "vancouver"}
+
+# Zotero numeruje każdą pozycję pobraną osobno od 1 — numer trzeba odciąć i nadać własny.
+_LEADING_NUMBER_RE = re.compile(r"^\s*(?:\[\s*\d+\s*\]|\(\s*\d+\s*\)|\d+\s*[.)])\s*")
+
 
 def list_styles() -> list[dict[str, str]]:
     return [dict(style) for style in CSL_STYLES]
@@ -43,6 +49,27 @@ def style_label(style_id: str) -> str:
         if style["id"] == style_id:
             return style["label"]
     return style_id
+
+
+def is_numeric_style(style_id: str) -> bool:
+    return (style_id or "").strip().lower() in NUMERIC_STYLE_IDS
+
+
+def strip_leading_number(text: str) -> str:
+    return _LEADING_NUMBER_RE.sub("", text or "").strip()
+
+
+def dedupe_item_keys(item_keys) -> list[str]:
+    """Unikalne klucze w kolejności pierwszego wystąpienia (kolejność cytowania)."""
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for raw in item_keys or []:
+        key = str(raw).strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        ordered.append(key)
+    return ordered
 
 
 class _BibHtmlParser(HTMLParser):
@@ -95,43 +122,153 @@ def parse_bib_html(bib_html: str) -> list[str]:
     return [line.strip() for line in plain.splitlines() if line.strip()]
 
 
-def export_items_bibliography(client, source: str, item_keys: list[str], style_id: str) -> dict:
-    """Pobiera sformatowaną bibliografię wybranych pozycji (kolejność = kolejność item_keys)."""
+def parse_formatted_items(raw, requested_keys: list[str]) -> dict[str, dict[str, str]]:
+    """Mapuje odpowiedź Zotero (format=json&include=bib,citation) na {item_key: {bib, citation}}."""
+    if not isinstance(raw, list):
+        return {}
+    wanted = set(requested_keys)
+    formatted: dict[str, dict[str, str]] = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        key = str(entry.get("key") or "").strip()
+        if not key or (wanted and key not in wanted):
+            continue
+        bib_entries = [item for item in parse_bib_html(entry.get("bib") or "") if item.strip()]
+        if not bib_entries:
+            continue
+        citation_html = entry.get("citation") or ""
+        citation = re.sub(r"<[^>]+>", "", citation_html)
+        citation = re.sub(r"\s+", " ", html.unescape(citation)).strip()
+        formatted[key] = {"bib": bib_entries[0], "citation": citation}
+    return formatted
+
+
+def _fetch_item_bibliography_entry(client, item_key: str, style_id: str) -> str:
+    bib_html = client.fetch_item_bibliography(item_key, style_id)
+    parsed = [entry for entry in parse_bib_html(bib_html) if entry.strip()]
+    return parsed[0] if parsed else ""
+
+
+def _fetch_item_citation_text(client, item_key: str, style_id: str) -> str:
+    fetch = getattr(client, "fetch_item_citation", None)
+    if fetch is None:
+        return ""
+    try:
+        return (fetch(item_key, style_id) or "").strip()
+    except Exception:  # noqa: BLE001 — cytowanie w tekście jest opcjonalne dla bibliografii
+        return ""
+
+
+def _fetch_formatted_items(
+    client,
+    item_keys: list[str],
+    style_id: str,
+    *,
+    need_citations: bool,
+) -> tuple[dict[str, dict[str, str]], list[str]]:
+    """Zwraca {item_key: {"bib": …, "citation": …}} plus klucze, których nie udało się pobrać.
+
+    Najpierw jedno zbiorcze żądanie (include=bib,citation), a dla braków — zapytania
+    pojedyncze, żeby stary Local API bez ?itemKey= nadal działał.
+    """
+    formatted: dict[str, dict[str, str]] = {}
+
+    batch = getattr(client, "fetch_items_formatted", None)
+    if batch is not None:
+        try:
+            raw = batch(item_keys, style_id) or {}
+        except Exception:  # noqa: BLE001 — fallback na zapytania pojedyncze
+            raw = {}
+        for key, value in raw.items():
+            entry = (value or {}).get("bib", "").strip()
+            if not entry:
+                continue
+            formatted[key] = {
+                "bib": entry,
+                "citation": (value or {}).get("citation", "").strip(),
+            }
+
+    missing: list[str] = []
+    for item_key in item_keys:
+        current = formatted.get(item_key)
+        if current is None:
+            try:
+                entry = _fetch_item_bibliography_entry(client, item_key, style_id)
+            except ZoteroClientError:
+                entry = ""
+            if not entry:
+                missing.append(item_key)
+                continue
+            current = {"bib": entry, "citation": ""}
+            formatted[item_key] = current
+        if need_citations and not current["citation"]:
+            current["citation"] = _fetch_item_citation_text(client, item_key, style_id)
+
+    return formatted, missing
+
+
+def build_document_citations(client, source: str, item_keys: list[str], style_id: str) -> dict:
+    """Spójne cytowania w tekście i bibliografia dla pozycji cytowanych w dokumencie.
+
+    Kolejność wejściowa to kolejność cytowania w dokumencie. Dla stylów numerycznych
+    numery nadaje serwer (dzięki temu [1] w tekście = pozycja 1 w bibliografii),
+    dla stylów autor–rok bibliografia jest sortowana alfabetycznie jak w Zotero.
+    """
     resolved_style = resolve_style_id(style_id)
-    normalized_keys = [key.strip() for key in item_keys if str(key).strip()]
-    if not normalized_keys:
+    ordered_keys = dedupe_item_keys(item_keys)
+    if not ordered_keys:
         raise ValueError("Wymagana niepusta lista item_keys.")
 
-    entries: list[str] = []
-    missing_keys: list[str] = []
-    for item_key in normalized_keys:
-        try:
-            bib_html = client.fetch_item_bibliography(item_key, resolved_style)
-        except ZoteroClientError:
-            missing_keys.append(item_key)
-            continue
-        parsed = [entry for entry in parse_bib_html(bib_html) if entry.strip()]
-        if parsed:
-            entries.append(parsed[0])
-        else:
-            missing_keys.append(item_key)
-
-    if not entries:
+    numeric = is_numeric_style(resolved_style)
+    formatted, missing_keys = _fetch_formatted_items(
+        client,
+        ordered_keys,
+        resolved_style,
+        need_citations=not numeric,
+    )
+    present_keys = [key for key in ordered_keys if key in formatted]
+    if not present_keys:
         raise ZoteroClientError(
             "Nie udało się sformatować bibliografii dla podanych pozycji "
             f"(styl {resolved_style})."
         )
 
+    citations: list[dict[str, str]] = []
+    if numeric:
+        entries = []
+        for index, item_key in enumerate(present_keys, start=1):
+            entry = strip_leading_number(formatted[item_key]["bib"])
+            entries.append(f"[{index}] {entry}")
+            citations.append({"item_key": item_key, "citation_text": f"[{index}]"})
+    else:
+        entries = sorted(
+            (formatted[key]["bib"] for key in present_keys),
+            key=lambda entry: entry.casefold(),
+        )
+        for item_key in present_keys:
+            citation = formatted[item_key]["citation"] or formatted[item_key]["bib"]
+            citations.append({"item_key": item_key, "citation_text": citation})
+
     payload = {
         "source": source,
         "style": resolved_style,
         "style_label": style_label(resolved_style),
+        "numeric": numeric,
         "item_count": len(entries),
-        "item_keys": normalized_keys,
+        "item_keys": present_keys,
         "entries": entries,
+        "citations": citations,
     }
     if missing_keys:
         payload["missing_item_keys"] = missing_keys
+    return payload
+
+
+def export_items_bibliography(client, source: str, item_keys: list[str], style_id: str) -> dict:
+    """Bibliografia wybranych pozycji (bez cytowań w tekście)."""
+    payload = build_document_citations(client, source, item_keys, style_id)
+    payload.pop("citations", None)
     return payload
 
 

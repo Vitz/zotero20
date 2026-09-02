@@ -3,6 +3,7 @@ from django.http import JsonResponse
 from apps.imports.middleware import json_api, normalize_doi, normalize_orcid, parse_json_body
 from .services.bibliography import (
     DEFAULT_STYLE_ID,
+    build_document_citations,
     export_collection_bibliography,
     export_items_bibliography,
     list_styles,
@@ -261,6 +262,56 @@ def styles_list(request):
     return JsonResponse({"styles": list_styles(), "default": DEFAULT_STYLE_ID})
 
 
+MAX_DOCUMENT_ITEM_KEYS = 150
+
+
+def _parse_item_keys(raw_item_keys):
+    """Zwraca (item_keys, error_response). Pusta lista nigdy nie oznacza „weź całą kolekcję”."""
+    if not isinstance(raw_item_keys, list):
+        return None, JsonResponse({"error": "Pole item_keys musi być tablicą."}, status=400)
+    item_keys = [str(key).strip() for key in raw_item_keys if str(key).strip()]
+    if not item_keys:
+        return None, JsonResponse({"error": "Wymagana niepusta lista item_keys."}, status=400)
+    if len(item_keys) > MAX_DOCUMENT_ITEM_KEYS:
+        return None, JsonResponse(
+            {
+                "error": f"Maksymalnie {MAX_DOCUMENT_ITEM_KEYS} pozycji "
+                "w jednym żądaniu bibliografii."
+            },
+            status=400,
+        )
+    return item_keys, None
+
+
+@json_api
+def citations_generate(request):
+    """Cytowania w tekście + bibliografia dla pozycji cytowanych w dokumencie (jeden styl)."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
+
+    body = parse_json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Nieprawidłowy JSON."}, status=400)
+
+    try:
+        style = resolve_style_id(body.get("style"))
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    item_keys, error = _parse_item_keys(body.get("item_keys"))
+    if error is not None:
+        return error
+
+    client, source = get_zotero_client()
+    try:
+        payload = build_document_citations(client, source, item_keys, style)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ZoteroClientError as exc:
+        return JsonResponse({"error": str(exc)}, status=502)
+    return JsonResponse(payload)
+
+
 @json_api
 def bibliography_generate(request):
     if request.method != "POST":
@@ -277,16 +328,9 @@ def bibliography_generate(request):
 
     raw_item_keys = body.get("item_keys")
     if raw_item_keys is not None:
-        if not isinstance(raw_item_keys, list):
-            return JsonResponse({"error": "Pole item_keys musi być tablicą."}, status=400)
-        item_keys = [str(key).strip() for key in raw_item_keys if str(key).strip()]
-        if not item_keys:
-            return JsonResponse({"error": "Wymagana niepusta lista item_keys."}, status=400)
-        if len(item_keys) > 150:
-            return JsonResponse(
-                {"error": "Maksymalnie 150 pozycji w jednym żądaniu bibliografii."},
-                status=400,
-            )
+        item_keys, error = _parse_item_keys(raw_item_keys)
+        if error is not None:
+            return error
         client, source = get_zotero_client()
         try:
             payload = export_items_bibliography(client, source, item_keys, style)

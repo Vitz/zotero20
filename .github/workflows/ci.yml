@@ -57,6 +57,18 @@ jobs:
           ZOTERO_WEB_API_KEY: ""
         run: pytest -v --tb=short
 
+  appsscript-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Sprawdź składnię i wersje plików Apps Script
+        run: node scripts/check-appsscript-syntax.js
+
   dockerfile-lint:
     runs-on: ubuntu-latest
     steps:

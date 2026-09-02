@@ -6,7 +6,7 @@ import requests
 from django.conf import settings
 
 from .doi import fetch_crossref_metadata
-from .bibliography import resolve_style_id
+from .bibliography import parse_formatted_items, resolve_style_id
 from .citation import format_citation_text, parse_citation_html
 from .exceptions import ZoteroClientError
 
@@ -344,6 +344,38 @@ class ZoteroWebClient:
                 response.status_code,
             )
         return response.text
+
+    def fetch_items_formatted(
+        self,
+        item_keys: list[str],
+        style: str,
+        locale: str = "pl-PL",
+    ) -> dict[str, dict[str, str]]:
+        """Zbiorczo pobiera bib+citation dla wielu pozycji (jedno żądanie, mapowanie po kluczu)."""
+        resolved_style = resolve_style_id(style)
+        keys = [str(key).strip() for key in item_keys if str(key).strip()]
+        if not keys:
+            return {}
+        user_id = self.resolve_user_id()
+        response = self._session.get(
+            f"{ZOTERO_WEB_API_BASE}/users/{user_id}/items",
+            params={
+                "itemKey": ",".join(keys),
+                "format": "json",
+                "include": "bib,citation",
+                "style": resolved_style,
+                "locale": locale,
+                "limit": len(keys),
+            },
+            timeout=self.timeout,
+        )
+        if response.status_code != 200:
+            raise ZoteroClientError(
+                f"Web API batch item export failed: HTTP {response.status_code} — "
+                f"{response.text[:500]}",
+                response.status_code,
+            )
+        return parse_formatted_items(response.json(), keys)
 
     def fetch_collection_bibliography(
         self,

@@ -6,6 +6,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import responses
 
@@ -28,6 +29,20 @@ def _no_format_param(request) -> tuple[bool, str]:
     return ok, "" if ok else "format query param present"
 
 
+def _batch_include_param(request) -> tuple[bool, str]:
+    ok = "include=bib" in request.url
+    return ok, "" if ok else "not a batch include=bib request"
+
+
+# Surowe wpisy bibliografii tak, jak zwraca je Zotero: każda pozycja pobrana osobno
+# dostaje w stylach numerycznych numer [1], stąd konieczność przenumerowania na serwerze.
+_BATCH_ITEMS = {
+    ITEM_KEY_1: ("Smith, J. (2013). Test Article About Nature.", "(Smith, 2013)"),
+    ITEM_KEY_2: ("Kowalski, A. (2020). Second Test Article.", "(Kowalski, 2020)"),
+}
+_NUMERIC_STYLES = ("ieee", "vancouver")
+
+
 def register_zotero_mocks(
     rsps: responses.RequestsMock | None = None,
     *,
@@ -48,6 +63,7 @@ def register_zotero_mocks(
     register_collection_bibliography(rsps, collection_key, base_url)
     register_item_detail(rsps, item_key_1, base_url)
     register_item_detail(rsps, item_key_2, base_url)
+    register_items_batch_formatted(rsps, f"{base_url}/api/users/0/items")
     register_doi_search_empty(rsps, base_url)
     register_add_item_by_id(rsps, new_key="NEWITEM1", base_url=base_url)
     register_exec_command(rsps, base_url)
@@ -167,6 +183,43 @@ def register_collection_bibliography(
     )
 
 
+def register_items_batch_formatted(
+    rsps: responses.RequestsMock,
+    items_url: str,
+) -> None:
+    """Symuluje GET …/items?itemKey=…&format=json&include=bib,citation."""
+
+    def callback(request):
+        query = parse_qs(urlparse(request.url).query)
+        keys = [key for key in (query.get("itemKey", [""])[0]).split(",") if key]
+        style = (query.get("style", ["apa"])[0] or "apa").lower()
+        numeric = style in _NUMERIC_STYLES
+        payload = []
+        for index, key in enumerate(keys, start=1):
+            if key not in _BATCH_ITEMS:
+                continue
+            entry, citation = _BATCH_ITEMS[key]
+            bib_entry = f"[1] {entry}" if numeric else entry
+            citation_text = "[1]" if numeric else citation
+            payload.append(
+                {
+                    "key": key,
+                    "bib": f'<div class="csl-bib-body"><div class="csl-entry">'
+                    f"{bib_entry}</div></div>",
+                    "citation": f'<span class="citation">{citation_text}</span>',
+                }
+            )
+        return 200, {"Content-Type": "application/json"}, json.dumps(payload)
+
+    rsps.add_callback(
+        responses.GET,
+        re.compile(rf"{re.escape(items_url)}\?.*"),
+        callback=callback,
+        match=[_batch_include_param],
+        content_type="application/json",
+    )
+
+
 def register_doi_search_empty(
     rsps: responses.RequestsMock,
     base_url: str = DEFAULT_BASE,
@@ -242,6 +295,7 @@ def register_web_api(
         json=load_json("collections.json"),
         status=200,
     )
+    register_items_batch_formatted(rsps, f"{base}/users/{user_id}/items")
     rsps.add(
         responses.GET,
         re.compile(rf"{re.escape(base)}/users/{user_id}/items\?.*"),

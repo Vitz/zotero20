@@ -80,3 +80,33 @@ ZOTERO20_INTEGRATION=1 ZOTERO20_API_KEY=... ZOTERO_BASE=http://127.0.0.1:8000 \
 - Projekt: `docker compose -p zotero20`
 - Nie rusza innych kontenerów na hoście
 - Brak `build` na serwerze — tylko `pull`
+
+## Routing publiczny — dlaczego domena potrafi serwować stary kod
+
+Ścieżka żądania: `zotero.keyweb.pl` → Cloudflare → **origin** → Caddy (`docx2pdf-caddy-1`)
+→ `172.17.0.1:8089` → `zotero20-zotero` → Django.
+
+Deploy aktualizuje wyłącznie ostatnie ogniwo. Jeśli Cloudflare kieruje domenę na inną
+maszynę (stary rekord DNS albo tunel z poprzedniego hosta), wszystkie testy na hoście
+przechodzą, a użytkownik dostaje stary kod. Dlatego:
+
+- `/api/v1/health` zwraca pole `build` z tagiem obrazu,
+- vhost Caddy dokłada nagłówek `X-Zotero20-Origin` z nazwą maszyny,
+- `scripts/verify-public.sh` (krok „Verify public domain serves this build” w deployu)
+  odpytuje **publiczny adres** i wywala deploy, gdy `build` nie zgadza się z wdrażanym SHA.
+
+Kto naprawdę odpowiada pod domeną:
+
+```bash
+curl -sS -D - https://zotero.keyweb.pl/api/v1/health | grep -iE 'x-zotero20-origin|build'
+```
+
+Obsługiwane sposoby wpięcia hosta wdrożeniowego jako originu:
+
+1. **Cloudflare Tunnel z tego hosta** — ustaw sekret `CLOUDFLARED_TUNNEL_TOKEN`
+   (deploy włączy wtedy profil `cloudflared` z `docker-compose.yml`),
+   a w Cloudflare skieruj hostname na ten tunel z ingress `http://127.0.0.1:8089`.
+2. **Publiczne `:443` hosta** — Caddy z `scripts/setup-caddy.sh` plus rekord A (proxied)
+   na adres hosta. Wymaga, by port 443 VPS-a był faktycznie osiągalny z internetu.
+
+Stary origin trzeba wyłączyć — inaczej przy każdej zmianie DNS może wrócić.

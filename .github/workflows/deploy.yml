@@ -109,7 +109,7 @@ jobs:
             set_env ZOTERO20_IMAGE_DJANGO "${IMAGE_DJANGO}"
             ./scripts/deploy.sh
             chmod +x scripts/setup-caddy.sh
-            ./scripts/setup-caddy.sh || echo "WARN: setup-caddy failed (sudo?)"
+            ./scripts/setup-caddy.sh
 
       - name: Smoke test
         uses: appleboy/ssh-action@v1.2.0
@@ -126,3 +126,12 @@ jobs:
             export REQUIRE_WEB_API=1
             cd "${{ vars.DEPLOY_PATH }}/stack"
             ./scripts/test-api.sh
+
+      # Smoke test na hoście przechodzi także wtedy, gdy domena wskazuje na inną maszynę.
+      # Dopiero ta kontrola odróżnia "wdrożone" od "wdrożone i faktycznie serwowane".
+      - name: Verify public domain serves this build
+        env:
+          PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL || 'https://zotero.keyweb.pl' }}
+          EXPECTED_BUILD: ${{ github.sha }}
+          ZOTERO20_API_KEY: ${{ secrets.ZOTERO20_API_KEY }}
+        run: bash stack/scripts/verify-public.sh

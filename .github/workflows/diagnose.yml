@@ -2,6 +2,12 @@ name: Diagnose remote
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "app = health aplikacji, routing = skąd domena bierze odpowiedź"
+        type: choice
+        options: [routing, app]
+        default: routing
 
 jobs:
   diag:
@@ -19,7 +25,89 @@ jobs:
           echo "host=$host" >> "$GITHUB_OUTPUT"
           echo "port=$port" >> "$GITHUB_OUTPUT"
 
-      - name: Remote diagnostics
+      - name: Public endpoint (z runnera, przez Cloudflare)
+        run: |
+          echo "=== DNS zotero.keyweb.pl ==="
+          getent hosts zotero.keyweb.pl || true
+          echo "=== DNS ${{ steps.ssh.outputs.host }} ==="
+          getent hosts "${{ steps.ssh.outputs.host }}" || true
+          echo "=== https://zotero.keyweb.pl/api/v1/health ==="
+          curl -sS -D - --max-time 30 https://zotero.keyweb.pl/api/v1/health || true
+          echo
+          echo "=== origin Mikrus bezpośrednio (Host: zotero.keyweb.pl) ==="
+          ORIGIN_IP=$(getent hosts "${{ steps.ssh.outputs.host }}" | awk '{print $1}' | head -1)
+          curl -sS -k -D - --max-time 20 --resolve "zotero.keyweb.pl:443:${ORIGIN_IP}" \
+            https://zotero.keyweb.pl/api/v1/health || true
+          echo
+
+      - name: Routing diagnostics (Mikrus)
+        if: ${{ inputs.mode == 'routing' }}
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ steps.ssh.outputs.host }}
+          port: ${{ steps.ssh.outputs.port }}
+          username: ${{ vars.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            echo "=== hostname / public IP ==="
+            hostname; id
+            curl -sS --max-time 15 https://api.ipify.org || true; echo
+
+            echo "=== docker ps -a (WSZYSTKIE kontenery) ==="
+            docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.CreatedAt}}\t{{.Status}}' || true
+
+            echo "=== docker compose ls -a ==="
+            docker compose ls -a || true
+
+            echo "=== nasłuch portów 8089/8000/23119 ==="
+            (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep -E '8089|:8000|23119' || echo "brak"
+
+            echo "=== kontenery publikujące 8089 ==="
+            for c in $(docker ps -a --format '{{.Names}}\t{{.Ports}}' | grep 8089 | cut -f1); do
+              echo "--- $c ---"
+              docker inspect "$c" --format '{{.Config.Image}} created={{.Created}} state={{.State.Status}}' || true
+              img=$(docker inspect "$c" --format '{{.Config.Image}}')
+              docker image inspect "$img" --format '{{.RepoDigests}} {{.Created}}' || true
+            done
+
+            echo "=== curl 127.0.0.1:8089 /api/v1/health ==="
+            curl -sS --max-time 15 http://127.0.0.1:8089/api/v1/health || true; echo
+            echo "=== curl 172.17.0.1:8089 /api/v1/health ==="
+            curl -sS --max-time 15 http://172.17.0.1:8089/api/v1/health || true; echo
+            echo "=== curl przez Caddy (Host: zotero.keyweb.pl) ==="
+            docker exec docx2pdf-caddy-1 wget -qO- --header="Host: zotero.keyweb.pl" \
+              http://172.17.0.1:8089/api/v1/health 2>&1 || true; echo
+            echo "=== curl publiczny Z HOSTA ==="
+            curl -sS --max-time 25 https://zotero.keyweb.pl/api/v1/health || true; echo
+
+            echo "=== Caddyfile: vhost zotero.keyweb.pl ==="
+            for f in /opt/docx2pdf/Caddyfile.mikrus /opt/docx2pdf/Caddyfile; do
+              [ -f "$f" ] && { echo "--- $f ---"; grep -A 25 'zotero.keyweb.pl' "$f" || echo "brak vhosta"; }
+            done
+            docker exec docx2pdf-caddy-1 sh -c 'grep -A 25 zotero.keyweb.pl /etc/caddy/Caddyfile' 2>&1 || true
+
+            echo "=== cloudflared / tunele ==="
+            docker ps -a --format '{{.Names}}\t{{.Image}}' | grep -i -E 'cloudflare|tunnel|ngrok|frp' || echo "brak kontenerow tunelowych"
+            pgrep -af cloudflared || echo "brak procesu cloudflared"
+            systemctl list-units --type=service 2>/dev/null | grep -i -E 'cloudflared|tunnel|caddy|nginx' || true
+            ls -la /etc/cloudflared 2>/dev/null || true
+
+            echo "=== czy cokolwiek na hoscie slucha 80/443 ==="
+            (ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null) | grep -E ':80 |:443 ' || echo "brak 80/443 na hoscie"
+
+            echo "=== stack .env (bez sekretow) ==="
+            grep -E '^(ZOTERO20_IMAGE|ZOTERO20_HOST_PORT|GUNICORN|DJANGO_ALLOWED_HOSTS)' \
+              "${{ vars.DEPLOY_PATH }}/stack/.env" || true
+            echo "=== inne katalogi ze stackiem zotero ==="
+            ls -la /home/*/ 2>/dev/null | head -60 || true
+            find / -maxdepth 4 -name 'docker-compose.y*ml' -path '*zotero*' 2>/dev/null || true
+
+            echo "=== git w DEPLOY_PATH ==="
+            git -C "${{ vars.DEPLOY_PATH }}" log -1 --oneline || true
+
+      - name: App diagnostics (Mikrus)
+        if: ${{ inputs.mode == 'app' }}
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ steps.ssh.outputs.host }}
@@ -43,35 +131,9 @@ jobs:
             echo "=== connector ping via django (Firefox Connector) ==="
             curl -sS -D - --max-time 30 -H "X-API-Key: ${{ secrets.ZOTERO20_API_KEY }}" \
               http://127.0.0.1:8089/connector/ping 2>&1 | head -25 || echo "FAIL: django connector proxy"
-            echo "=== document/execCommand reachability (expect 400/405, not 502/timeout) ==="
-            curl -sS -w "\nHTTP %{http_code} time=%{time_total}s\n" --max-time 45 \
-              -X POST -H "X-API-Key: ${{ secrets.ZOTERO20_API_KEY }}" \
-              -H "Content-Type: application/json" \
-              -d '{}' \
-              http://127.0.0.1:8089/connector/document/execCommand 2>&1 | tail -5 \
-              || echo "FAIL: document/execCommand proxy timeout"
             echo "=== django logs (tail 50) ==="
             docker compose -p zotero20 logs django --tail 50 2>/dev/null || docker logs zotero20-django --tail 50 2>/dev/null || true
             echo "=== collections (API key) ==="
             curl -fsS -H "X-API-Key: ${{ secrets.ZOTERO20_API_KEY }}" \
               http://127.0.0.1:8089/api/v1/collections || true
             echo
-            echo "=== collections source check ==="
-            curl -fsS -H "X-API-Key: ${{ secrets.ZOTERO20_API_KEY }}" \
-              http://127.0.0.1:8089/api/v1/collections \
-              | grep -q '"source": "web"' \
-              && echo "OK: source=web (zotero.org)" \
-              || echo "WARN: source!=web — sprawdź ZOTERO_WEB_API_KEY w stack/.env"
-            echo
-            echo "=== import DOI test (Hybrid 6GFRGT7A) ==="
-            curl -sS -w "\nHTTP %{http_code}\n" \
-              -H "X-API-Key: ${{ secrets.ZOTERO20_API_KEY }}" \
-              -H "Content-Type: application/json" \
-              -d '{"doi":"10.1038/nature12373","collection_key":"6GFRGT7A"}' \
-              http://127.0.0.1:8089/api/v1/import/doi || true
-            echo
-            echo "=== docx2pdf caddy ==="
-            docker exec docx2pdf-caddy-1 cat /etc/caddy/Caddyfile | tail -15 2>/dev/null || true
-            echo "=== caddy -> zotero (Host header) ==="
-            docker exec docx2pdf-caddy-1 wget -qO- --header="Host: zotero.keyweb.pl" \
-              http://172.17.0.1:8089/api/v1/health 2>&1 || true

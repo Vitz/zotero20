@@ -71,13 +71,18 @@ awk -v re="^${DOMAIN_RE}[[:space:]]*\\{" '
 
 { cat "${WORK_DIR}/base"; echo; printf '%s\n' "${VHOST}"; } > "${WORK_DIR}/new"
 
+# Walidacja przed dotknięciem pliku produkcyjnego — Caddy obsługuje też cudzy projekt.
+docker run --rm -v "${WORK_DIR}:/new:ro" -v "${CADDY_DIR}/certs:/etc/caddy/certs:ro" \
+  caddy:2-alpine caddy validate --config /new/new --adapter caddyfile
+
 if cmp -s "${WORK_DIR}/new" "${CADDY_FILE}"; then
   RESULT=UNCHANGED
 else
   RESULT=CHANGED
-  # Zapis wymaga roota — user deployu ma tylko dostęp do dockera.
+  # Zapis wymaga roota (user deployu ma tylko dockera), a przekierowanie zamiast `cp`
+  # zachowuje i-node — plik jest bind-mountem, więc podmiana i-node odcięłaby kontener.
   docker run --rm -v "${CADDY_DIR}:/mnt" -v "${WORK_DIR}:/new:ro" alpine:3.20 sh -c \
-    'cp /mnt/Caddyfile.mikrus /mnt/Caddyfile.mikrus.zotero20.bak && cp /new/new /mnt/Caddyfile.mikrus'
+    'cp /mnt/Caddyfile.mikrus /mnt/Caddyfile.mikrus.zotero20.bak && cat /new/new > /mnt/Caddyfile.mikrus'
 fi
 
 echo "Caddy: vhost ${DOMAIN} → ${UPSTREAM} (${RESULT})"
@@ -87,27 +92,46 @@ if ! docker ps --format '{{.Names}}' | grep -q "^${CADDY_CONTAINER}$"; then
   exit 0
 fi
 
-if [ "${RESULT}" = "CHANGED" ]; then
-  if ! docker exec "${CADDY_CONTAINER}" caddy validate --config /etc/caddy/Caddyfile \
-    || ! docker exec "${CADDY_CONTAINER}" caddy reload --config /etc/caddy/Caddyfile; then
-    echo "BŁĄD: Caddy odrzucił konfigurację — przywracam kopię zapasową"
-    docker run --rm -v "${CADDY_DIR}:/mnt" alpine:3.20 \
-      sh -c 'cp /mnt/Caddyfile.mikrus.zotero20.bak /mnt/Caddyfile.mikrus'
-    docker exec "${CADDY_CONTAINER}" caddy reload --config /etc/caddy/Caddyfile || true
-    exit 1
-  fi
+container_sees_config() {
+  docker exec "${CADDY_CONTAINER}" cat /etc/caddy/Caddyfile 2>/dev/null \
+    | cmp -s - "${WORK_DIR}/new"
+}
+
+if ! container_sees_config; then
+  # Historyczne `sed -i` podmieniło i-node pliku, więc kontener trzyma nieaktualny
+  # bind-mount i `caddy reload` czyta starą treść. Restart przepina mount na nowy plik.
+  echo "Caddy: kontener widzi nieaktualną konfigurację — restart ${CADDY_CONTAINER}"
+  docker restart "${CADDY_CONTAINER}" >/dev/null
+  for _ in 1 2 3 4 5 6; do
+    container_sees_config && break
+    sleep 2
+  done
+elif [ "${RESULT}" = "CHANGED" ]; then
+  docker exec "${CADDY_CONTAINER}" caddy reload --config /etc/caddy/Caddyfile
   echo "Caddy: reload OK"
+fi
+
+if ! container_sees_config; then
+  echo "BŁĄD: ${CADDY_CONTAINER} nadal nie widzi wygenerowanej konfiguracji"
+  exit 1
 fi
 
 # Kontrola przez sam listener Caddy (nie tylko upstream) — łapie zły vhost i zły upstream.
 LOCAL=""
-for attempt in 1 2 3; do
-  LOCAL=$(curl -sSk --max-time 20 --connect-to "${DOMAIN}:443:127.0.0.1:443" \
-    "https://${DOMAIN}/api/v1/health" 2>/dev/null || true)
+for attempt in 1 2 3 4 5; do
+  LOCAL=$(curl -sSk -D "${WORK_DIR}/headers" --max-time 20 \
+    --connect-to "${DOMAIN}:443:127.0.0.1:443" "https://${DOMAIN}/api/v1/health" 2>/dev/null || true)
   [ -n "${LOCAL}" ] && break
   sleep 3
 done
 echo "Caddy → ${DOMAIN} (lokalnie): ${LOCAL:-<brak odpowiedzi>}"
+
+if ! grep -qi "^x-zotero20-origin: *${ORIGIN_ID}" "${WORK_DIR}/headers" 2>/dev/null; then
+  echo "BŁĄD: odpowiedź z lokalnego listenera Caddy nie ma nagłówka X-Zotero20-Origin: ${ORIGIN_ID}"
+  exit 1
+fi
+echo "Caddy: nagłówek X-Zotero20-Origin: ${ORIGIN_ID} obecny"
+
 if [ -n "${ZOTERO20_IMAGE_DJANGO:-}" ] && [ "${LOCAL#*"${ZOTERO20_IMAGE_DJANGO}"}" = "${LOCAL}" ]; then
   echo "BŁĄD: Caddy na tym hoście nie serwuje wdrożonego builda (${ZOTERO20_IMAGE_DJANGO})"
   exit 1

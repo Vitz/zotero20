@@ -78,6 +78,12 @@ Przy pierwszym uruchomieniu wersji 2.0.0 panel jednorazowo konwertuje zachowane 
 i czyści stary rejestr. Cytowania, których `NamedRange` już nie istnieje (typowa przyczyna komunikatu
 „brak śledzonych cytowań”), trzeba wstawić ponownie.
 
+## Sprawdzenie, czy serwer ma aktualny kod
+
+`GET https://zotero.keyweb.pl/api/v1/health` zwraca pole `build` z tagiem wdrożonego obrazu.
+Jeśli pola `build` **nie ma**, domena kieruje na starą instancję i nowe endpointy (`/citations`)
+nie będą działać, nawet gdy GitHub Actions pokazuje udany deploy.
+
 ## Endpointy używane przez panel
 
 | Endpoint | Do czego |

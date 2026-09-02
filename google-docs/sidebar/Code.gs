@@ -469,13 +469,21 @@ function removeBibliographySection_(doc, body) {
   }
 
   if (!indices.length) {
-    // Awaryjnie: sekcja bibliografii to nagłówek „Bibliografia” i wszystko po nim
-    // (panel zawsze dopisuje ją na końcu dokumentu).
+    // Awaryjnie (NamedRange zgubiony przy edycji): sekcja to nagłówek „Bibliografia”
+    // i akapity do następnego nagłówka H1 lub do końca dokumentu.
     var headingIdx = findBibliographyHeadingIndex_(body);
     if (headingIdx < 0) {
       return false;
     }
-    for (var k = headingIdx; k < body.getNumChildren(); k++) {
+    indices.push(headingIdx);
+    for (var k = headingIdx + 1; k < body.getNumChildren(); k++) {
+      var next = body.getChild(k);
+      if (
+        next.getType() === DocumentApp.ElementType.PARAGRAPH &&
+        next.asParagraph().getHeading() === DocumentApp.ParagraphHeading.HEADING1
+      ) {
+        break;
+      }
       indices.push(k);
     }
   }

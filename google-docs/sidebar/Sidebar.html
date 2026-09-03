@@ -125,6 +125,7 @@
       line-height: 1.35;
       word-break: break-word;
     }
+    .collection-item-meta a { word-break: break-all; }
     .collection-remove-btn {
       background: #fff3e0;
       border: 1px solid #ffcc80;
@@ -438,7 +439,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.1.0';
+    var SIDEBAR_VERSION = '2.1.1';
 
     // UrlFetchApp ma limity dzienne — 3 s to kompromis vs prośba o 1 s.
     // Przy długim otwarciu sidebara rozważ później 5 s w ustawieniach.
@@ -819,26 +820,28 @@
       return match ? match[1] : dateStr;
     }
 
-    function formatItemMetaLine(item) {
+    function appendItemMeta(parent, item) {
       var parts = [];
       var author = formatFirstAuthor(item.creators || item.authors);
       if (author) parts.push(author);
       var date = formatItemDate(item.date || item.year);
       if (date) parts.push(date);
-      if (item.doi) {
-        var doi = String(item.doi);
-        if (doi.length > 24) doi = doi.substring(0, 22) + '…';
-        parts.push(doi);
-      }
-      return parts.join(' · ');
-    }
-
-    function appendItemMeta(parent, item) {
-      var metaText = formatItemMetaLine(item);
-      if (!metaText) return;
+      var doi = stripDoiPrefix(item.doi);
+      if (!parts.length && !doi) return;
       var meta = document.createElement('div');
       meta.className = 'collection-item-meta';
-      meta.textContent = metaText;
+      if (parts.length) {
+        meta.appendChild(document.createTextNode(parts.join(' · ') + (doi ? ' · ' : '')));
+      }
+      if (doi) {
+        var link = document.createElement('a');
+        link.href = 'https://doi.org/' + encodeURI(doi);
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = doi;
+        link.onclick = function (e) { e.stopPropagation(); };
+        meta.appendChild(link);
+      }
       parent.appendChild(meta);
     }
 

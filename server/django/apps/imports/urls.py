@@ -9,6 +9,11 @@ urlpatterns = [
     path("import/doi", views.import_doi, name="import-doi"),
     path("import/orcid", views.import_orcid, name="import-orcid"),
     path("collection-items", views.collection_items, name="collection-items"),
+    path(
+        "collections/<str:collection_key>/items/<str:item_key>",
+        views.collection_item_remove,
+        name="collection-item-remove",
+    ),
     path("styles", views.styles_list, name="styles"),
     path("bibliography", views.bibliography_generate, name="bibliography"),
     path("citations", views.citations_generate, name="citations"),

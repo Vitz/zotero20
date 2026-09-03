@@ -81,6 +81,23 @@
       font-size: 11px;
       white-space: nowrap;
     }
+    .collection-item-meta {
+      font-size: 11px;
+      color: #555;
+      margin-top: 2px;
+      line-height: 1.35;
+      word-break: break-word;
+    }
+    .collection-remove-btn {
+      background: #fff3e0;
+      border: 1px solid #ffcc80;
+      color: #8a4b00;
+    }
+    #kolekcja-empty, #kolekcja-loading {
+      font-size: 12px;
+      color: #555;
+      margin: 8px 0;
+    }
     #duplicate-offer {
       display: none;
       margin-top: 10px;
@@ -167,6 +184,7 @@
     <button type="button" onclick="showTab('doi')">DOI</button>
     <button type="button" onclick="showTab('orcid')">ORCID</button>
     <button type="button" onclick="showTab('biblio')">Cytowania</button>
+    <button type="button" onclick="showTab('kolekcja')">Kolekcja</button>
     <button type="button" onclick="showTab('status')">Status</button>
   </div>
 
@@ -295,6 +313,26 @@
     </details>
   </div>
 
+  <div id="tab-kolekcja" class="tab">
+    <div id="current-collection-kolekcja" class="current-collection" style="display:none;">
+      <strong>Domyślna kolekcja</strong>
+      <span id="current-collection-kolekcja-label"></span>
+    </div>
+    <p class="hint" style="font-size:11px;color:#555;margin-top:0;">
+      Usuń pozycję z kolekcji na serwerze. Pozycja pozostaje w bibliotece Zotero — znika tylko z tej kolekcji.
+    </p>
+    <div id="kolekcja-search-wrap" style="position:relative;margin-bottom:6px;">
+      <input id="kolekcja-search" type="search" placeholder="Szukaj po tytule, autorze, DOI…" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;margin-top:0;padding:6px 28px 6px 6px;font-size:12px;">
+      <button type="button" id="kolekcja-search-clear" title="Wyczyść" aria-label="Wyczyść" style="position:absolute;right:2px;top:50%;transform:translateY(-50%);width:auto;margin:0;padding:2px 8px;font-size:16px;line-height:1;background:transparent;border:none;color:#666;cursor:pointer;display:none;">×</button>
+    </div>
+    <p id="kolekcja-filter-count" style="font-size:11px;color:#555;margin:0 0 6px;display:none;"></p>
+    <p id="kolekcja-dedup-note" class="hint" style="font-size:11px;color:#555;display:none;"></p>
+    <p id="kolekcja-loading" style="display:none;">Ładowanie pozycji…</p>
+    <p id="kolekcja-empty" style="display:none;">Brak pozycji w kolekcji.</p>
+    <div id="kolekcja-list"></div>
+    <button type="button" onclick="loadKolekcjaTab()" style="margin-top:10px;">Odśwież listę</button>
+  </div>
+
   <div id="tab-status" class="tab">
     <button type="button" onclick="loadStatus()">Odśwież status</button>
     <pre id="status-text"></pre>
@@ -334,7 +372,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.0.2';
+    var SIDEBAR_VERSION = '2.0.3';
 
     var lastImport = { doi: '', orcid: '', itemKey: '', citationText: '', identifiers: null };
     var duplicateItem = null;
@@ -402,6 +440,7 @@
       document.querySelectorAll('.tab').forEach(function (el) { el.classList.remove('active'); });
       document.getElementById('tab-' + name).classList.add('active');
       if (name === 'status') loadStatus();
+      if (name === 'kolekcja') loadKolekcjaTab();
     }
 
     function setStatus(msg, isError) {
@@ -567,6 +606,31 @@
       title = String(title || '').trim();
       if (title.length <= max) return title || '(bez tytułu)';
       return title.substring(0, max) + '…';
+    }
+
+    function formatAuthorsSnippet(creators, maxAuthors) {
+      maxAuthors = maxAuthors || 2;
+      var names = [];
+      var list = creators || [];
+      if (!Array.isArray(list)) {
+        return typeof list === 'string' ? list : '';
+      }
+      list.forEach(function (c) {
+        if (typeof c === 'string') {
+          names.push(c);
+        } else if (c && typeof c === 'object') {
+          var part = String(c.lastName || c.last_name || c.name || '').trim();
+          var first = String(c.firstName || c.first_name || '').trim();
+          if (first && part) part = first.charAt(0) + '. ' + part;
+          else if (!part) part = first;
+          if (part) names.push(part);
+        }
+      });
+      if (!names.length) return '';
+      var shown = names.slice(0, maxAuthors);
+      var text = shown.join(', ');
+      if (names.length > maxAuthors) text += ' i in.';
+      return text;
     }
 
     var studyOverviewState = {
@@ -770,6 +834,222 @@
             .getSessionItems();
         })
         .getCollectionItems(appState.defaultCollection.key, 15);
+    }
+
+    var kolekcjaState = {
+      allItems: [],
+      meta: {},
+      searchQuery: '',
+      searchTimer: null,
+      loading: false,
+    };
+
+    function setKolekcjaLoading(loading) {
+      kolekcjaState.loading = !!loading;
+      var el = document.getElementById('kolekcja-loading');
+      if (el) el.style.display = loading ? 'block' : 'none';
+    }
+
+    function updateKolekcjaSearchClearButton() {
+      var input = document.getElementById('kolekcja-search');
+      var btn = document.getElementById('kolekcja-search-clear');
+      if (!input || !btn) return;
+      btn.style.display = input.value.trim() ? 'block' : 'none';
+    }
+
+    function updateKolekcjaFilterCount(visible, total, filtering) {
+      var el = document.getElementById('kolekcja-filter-count');
+      if (!el) return;
+      if (filtering && total > 0) {
+        el.style.display = 'block';
+        el.textContent = visible + ' z ' + total + ' pozycji';
+      } else {
+        el.style.display = 'none';
+        el.textContent = '';
+      }
+    }
+
+    function renderKolekcjaRows(items) {
+      var list = document.getElementById('kolekcja-list');
+      var empty = document.getElementById('kolekcja-empty');
+      if (!list) return;
+      list.innerHTML = '';
+      if (!items.length) {
+        if (empty) empty.style.display = kolekcjaState.allItems.length ? 'block' : 'none';
+        if (empty && kolekcjaState.allItems.length) {
+          empty.textContent = 'Brak pozycji pasujących do wyszukiwania.';
+        }
+        return;
+      }
+      if (empty) empty.style.display = 'none';
+      items.forEach(function (item) {
+        var row = document.createElement('div');
+        row.className = 'study-row';
+
+        var body = document.createElement('div');
+        body.className = 'study-title';
+
+        var title = document.createElement('div');
+        title.textContent = truncateTitle(item.title);
+        if (item.citation_text) title.title = item.citation_text;
+        body.appendChild(title);
+
+        var metaParts = [];
+        var authors = formatAuthorsSnippet(item.creators || item.authors);
+        if (authors) metaParts.push(authors);
+        if (item.doi) metaParts.push('DOI: ' + item.doi);
+        if (metaParts.length) {
+          var meta = document.createElement('div');
+          meta.className = 'collection-item-meta';
+          meta.textContent = metaParts.join(' · ');
+          body.appendChild(meta);
+        }
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'collection-remove-btn';
+        btn.textContent = 'Usuń z kolekcji';
+        btn.onclick = (function (it) {
+          return function () { removeKolekcjaItem(it); };
+        })(item);
+
+        row.appendChild(body);
+        row.appendChild(btn);
+        list.appendChild(row);
+      });
+    }
+
+    function applyKolekcjaFilter() {
+      var query = kolekcjaState.searchQuery;
+      var allItems = kolekcjaState.allItems;
+      var filtered = filterStudyItems(allItems, query);
+      var filtering = !!String(query || '').trim();
+      updateKolekcjaFilterCount(filtered.length, allItems.length, filtering);
+      renderKolekcjaRows(filtered);
+    }
+
+    function onKolekcjaSearchInput() {
+      var input = document.getElementById('kolekcja-search');
+      if (!input) return;
+      updateKolekcjaSearchClearButton();
+      clearTimeout(kolekcjaState.searchTimer);
+      kolekcjaState.searchTimer = setTimeout(function () {
+        kolekcjaState.searchQuery = input.value;
+        applyKolekcjaFilter();
+      }, 150);
+    }
+
+    function clearKolekcjaSearch() {
+      var input = document.getElementById('kolekcja-search');
+      if (!input) return;
+      input.value = '';
+      kolekcjaState.searchQuery = '';
+      updateKolekcjaSearchClearButton();
+      applyKolekcjaFilter();
+      input.focus();
+    }
+
+    function initKolekcjaSearch() {
+      var input = document.getElementById('kolekcja-search');
+      var btn = document.getElementById('kolekcja-search-clear');
+      if (!input) return;
+      input.addEventListener('input', onKolekcjaSearchInput);
+      input.addEventListener('search', onKolekcjaSearchInput);
+      if (btn) btn.addEventListener('click', clearKolekcjaSearch);
+    }
+
+    function renderKolekcjaTab(items, meta) {
+      meta = meta || {};
+      var empty = document.getElementById('kolekcja-empty');
+      var dedupNote = document.getElementById('kolekcja-dedup-note');
+      kolekcjaState.allItems = items || [];
+      kolekcjaState.meta = meta;
+      if (!kolekcjaState.allItems.length) {
+        if (empty) {
+          empty.style.display = 'block';
+          empty.textContent = appState.defaultCollection.key
+            ? 'Brak pozycji w kolekcji.'
+            : 'Ustaw domyślną kolekcję w zakładce Ustawienia.';
+        }
+        document.getElementById('kolekcja-list').innerHTML = '';
+        if (dedupNote) dedupNote.style.display = 'none';
+        updateKolekcjaFilterCount(0, 0, false);
+        return;
+      }
+      if (empty) empty.style.display = 'none';
+      if (dedupNote) {
+        if (meta.hidden_duplicate_dois) {
+          dedupNote.style.display = 'block';
+          dedupNote.textContent =
+            'Ukryto ' + meta.hidden_duplicate_dois + ' duplikat(ów) DOI na liście.';
+        } else {
+          dedupNote.style.display = 'none';
+          dedupNote.textContent = '';
+        }
+      }
+      applyKolekcjaFilter();
+    }
+
+    function loadKolekcjaTab() {
+      if (!appState.defaultCollection.key) {
+        renderKolekcjaTab([]);
+        return;
+      }
+      setKolekcjaLoading(true);
+      google.script.run
+        .withSuccessHandler(function (data) {
+          setKolekcjaLoading(false);
+          var items = (data && data.items) || [];
+          renderKolekcjaTab(items, {
+            hidden_duplicate_dois: data && data.hidden_duplicate_dois,
+            doi_dedup_note: data && data.doi_dedup_note,
+          });
+        })
+        .withFailureHandler(function (e) {
+          setKolekcjaLoading(false);
+          renderKolekcjaTab([]);
+          setStatus(formatScriptError(e), true);
+        })
+        .getCollectionItems(appState.defaultCollection.key, 50);
+    }
+
+    function removeKolekcjaItem(item) {
+      if (!appState.defaultCollection.key) {
+        setStatus('Ustaw domyślną kolekcję w zakładce Ustawienia.', true);
+        showTab('settings');
+        return;
+      }
+      var itemKey = item.key || item.item_key || '';
+      if (!itemKey) {
+        setStatus('Brak klucza pozycji — nie można usunąć.', true);
+        return;
+      }
+      var label = truncateTitle(item.title, 50);
+      if (
+        !confirm(
+          'Usunąć „' + label + '” z kolekcji?\n\nPozycja pozostanie w bibliotece Zotero — znika tylko z tej kolekcji.'
+        )
+      ) {
+        return;
+      }
+      setStatus('Usuwanie z kolekcji…');
+      google.script.run
+        .withSuccessHandler(function (r) {
+          if (r && r.removed) {
+            setStatus('Usunięto z kolekcji: ' + label);
+            loadKolekcjaTab();
+            loadStudyOverview();
+          } else if (r && r.reason === 'not_in_collection') {
+            setStatus('Pozycja nie jest już w tej kolekcji.', true);
+            loadKolekcjaTab();
+          } else {
+            setStatus('Nie udało się usunąć pozycji z kolekcji.', true);
+          }
+        })
+        .withFailureHandler(function (e) {
+          setStatus(formatScriptError(e), true);
+        })
+        .removeFromCollection(appState.defaultCollection.key, itemKey);
     }
 
     function hidePostImport() {
@@ -1089,7 +1369,7 @@
     function updateCurrentCollectionLabels() {
       var label = appState.defaultCollection.name || appState.defaultCollection.key || '';
       var hasDefault = !!appState.defaultCollection.key;
-      ['doi', 'orcid', 'biblio'].forEach(function (suffix) {
+      ['doi', 'orcid', 'biblio', 'kolekcja'].forEach(function (suffix) {
         var box = document.getElementById('current-collection-' + suffix);
         var text = document.getElementById('current-collection-' + suffix + '-label');
         if (hasDefault) {
@@ -1109,6 +1389,7 @@
       } else {
         showSetupWarning('');
         loadStudyOverview();
+        loadKolekcjaTab();
       }
     }
 
@@ -1376,6 +1657,7 @@
 
     function boot() {
       initStudyOverviewSearch();
+      initKolekcjaSearch();
       setStatus('Ładowanie…');
       checkAddonVersion();
       loadDefaultCollection();

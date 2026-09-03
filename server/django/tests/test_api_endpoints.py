@@ -11,6 +11,7 @@ from tests.helpers.zotero_mock import (
     register_doi_search_found,
     register_full_local_api,
     register_local_zotero_base,
+    register_remove_from_collection,
 )
 
 
@@ -381,3 +382,36 @@ class TestCollectionItemsEndpoint:
         data = response.json()
         assert data["collection_key"] == COLLECTION_KEY
         assert len(data["items"]) == 2
+
+
+@pytest.mark.django_db
+class TestCollectionItemRemoveEndpoint:
+    @responses.activate
+    def test_remove_item_from_collection(self, api_client, auth_headers):
+        register_full_local_api(responses)
+        register_remove_from_collection(responses, ITEM_KEY_1)
+        response = api_client.delete(
+            f"/api/v1/collections/{COLLECTION_KEY}/items/{ITEM_KEY_1}",
+            **auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["removed"] is True
+        assert data["item_key"] == ITEM_KEY_1
+        assert data["collection_key"] == COLLECTION_KEY
+        assert data["source"] == "local"
+
+    @responses.activate
+    def test_remove_missing_item(self, api_client, auth_headers):
+        register_full_local_api(responses)
+        responses.add(
+            responses.GET,
+            f"http://127.0.0.1:23119/api/users/0/items/MISSING1",
+            json={"error": "not found"},
+            status=404,
+        )
+        response = api_client.delete(
+            f"/api/v1/collections/{COLLECTION_KEY}/items/MISSING1",
+            **auth_headers,
+        )
+        assert response.status_code == 404

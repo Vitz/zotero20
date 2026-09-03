@@ -8,7 +8,7 @@ from django.http import JsonResponse
 def json_api(view_func):
     @wraps(view_func)
     def wrapper(request, *args, **kwargs):
-        if request.method not in ("GET", "POST", "OPTIONS"):
+        if request.method not in ("GET", "POST", "DELETE", "OPTIONS"):
             return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
         return view_func(request, *args, **kwargs)
 

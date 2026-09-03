@@ -316,6 +316,29 @@ def collection_items(request):
 
 
 @json_api
+def collection_item_remove(request, collection_key: str, item_key: str):
+    if request.method != "DELETE":
+        return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
+
+    collection_key = (collection_key or "").strip()
+    item_key = (item_key or "").strip()
+    if not collection_key:
+        return JsonResponse({"error": "Wymagany klucz kolekcji."}, status=400)
+    if not item_key:
+        return JsonResponse({"error": "Wymagany klucz pozycji."}, status=400)
+
+    client, source = get_zotero_client()
+    try:
+        result = client.remove_item_from_collection(collection_key, item_key)
+    except ZoteroClientError as exc:
+        status = 404 if exc.status_code == 404 else 502
+        return JsonResponse({"error": str(exc)}, status=status)
+
+    result["source"] = source
+    return JsonResponse(result)
+
+
+@json_api
 def styles_list(request):
     if request.method != "GET":
         return JsonResponse({"error": "Metoda niedozwolona."}, status=405)

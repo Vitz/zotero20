@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.0.2';
+const ADDON_VERSION = '2.0.3';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -127,6 +127,20 @@ function getCollectionItems(collectionKey, limit) {
   }
   var lim = limit || 20;
   return apiGet('/collection-items?collection_key=' + encodeURIComponent(key) + '&limit=' + lim);
+}
+
+function removeFromCollection(collectionKey, itemKey) {
+  var coll = String(collectionKey || '').trim();
+  var item = String(itemKey || '').trim();
+  if (!coll) {
+    throw new Error('Brak klucza kolekcji.');
+  }
+  if (!item) {
+    throw new Error('Brak klucza pozycji.');
+  }
+  return apiDelete(
+    '/collections/' + encodeURIComponent(coll) + '/items/' + encodeURIComponent(item)
+  );
 }
 
 function getBibliographyStyles() {
@@ -1195,6 +1209,18 @@ function apiPost(path, payload) {
     JSON.stringify({ at: new Date().toISOString(), path: path, result: parsed })
   );
   return parsed;
+}
+
+function apiDelete(path) {
+  if (getDebugMode() && path.indexOf('debug=') < 0) {
+    path += (path.indexOf('?') >= 0 ? '&' : '?') + 'debug=1';
+  }
+  const response = UrlFetchApp.fetch(API_BASE + path, {
+    method: 'delete',
+    muteHttpExceptions: true,
+    headers: apiHeaders_(),
+  });
+  return parseResponse_(response);
 }
 
 function apiHeaders_() {

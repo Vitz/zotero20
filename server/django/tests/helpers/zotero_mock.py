@@ -125,6 +125,26 @@ def register_item_detail(
     )
 
 
+def register_remove_from_collection(
+    rsps: responses.RequestsMock,
+    item_key: str,
+    collection_key: str = COLLECTION_KEY,
+    base_url: str = DEFAULT_BASE,
+) -> None:
+    def _patch_item(request):
+        body = json.loads(request.body or "{}")
+        assert body.get("key") == item_key
+        assert collection_key not in (body.get("collections") or [])
+        return (200, {}, json.dumps({"successful": {item_key: {"key": item_key}}}))
+
+    rsps.add_callback(
+        responses.PATCH,
+        f"{base_url}/api/users/0/items/{item_key}",
+        callback=_patch_item,
+        content_type="application/json",
+    )
+
+
 def register_item_citation(
     rsps: responses.RequestsMock,
     item_key: str,

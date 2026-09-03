@@ -175,21 +175,85 @@ class ZoteroWebClient:
             )
         return [self._summarize_item(entry) for entry in raw if isinstance(entry, dict)]
 
-    def get_item(self, item_key: str) -> dict | None:
+    def _fetch_item_entry(self, item_key: str) -> dict:
         user_id = self.resolve_user_id()
         response = self._session.get(
             f"{ZOTERO_WEB_API_BASE}/users/{user_id}/items/{item_key}",
             timeout=self.timeout,
         )
+        if response.status_code == 404:
+            raise ZoteroClientError("Pozycja nie istnieje w bibliotece Zotero.", 404)
         if response.status_code != 200:
-            return None
+            raise ZoteroClientError(
+                f"Web API get item failed: HTTP {response.status_code} — "
+                f"{response.text[:500]}",
+                response.status_code,
+            )
         try:
             entry = response.json()
-        except ValueError:
-            return None
-        if isinstance(entry, dict):
-            return self._summarize_item(entry)
-        return None
+        except ValueError as exc:
+            raise ZoteroClientError(
+                f"get item: invalid JSON — {response.text[:200]}",
+                response.status_code,
+            ) from exc
+        if not isinstance(entry, dict):
+            raise ZoteroClientError(
+                f"get item: expected JSON object, got {type(entry).__name__}",
+                response.status_code,
+            )
+        return entry
+
+    def get_item(self, item_key: str) -> dict | None:
+        try:
+            entry = self._fetch_item_entry(item_key)
+        except ZoteroClientError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+        return self._summarize_item(entry)
+
+    def remove_item_from_collection(self, collection_key: str, item_key: str) -> dict:
+        """Usuwa pozycję z kolekcji (nie kasuje jej z biblioteki Zotero)."""
+        entry = self._fetch_item_entry(item_key)
+        data = entry.get("data") or {}
+        collections = list(data.get("collections") or [])
+        if collection_key not in collections:
+            return {
+                "removed": False,
+                "reason": "not_in_collection",
+                "item_key": item_key,
+                "collection_key": collection_key,
+            }
+
+        version = entry.get("version")
+        if version is None:
+            raise ZoteroClientError("Brak wersji pozycji — nie można zaktualizować w Zotero.")
+
+        new_collections = [key for key in collections if key != collection_key]
+        user_id = self.resolve_user_id()
+        patch_body = {
+            "key": item_key,
+            "version": version,
+            "collections": new_collections,
+        }
+        response = self._session.patch(
+            f"{ZOTERO_WEB_API_BASE}/users/{user_id}/items/{item_key}",
+            json=patch_body,
+            headers={"If-Unmodified-Since-Version": str(version)},
+            timeout=self.timeout,
+        )
+        if response.status_code not in (200, 204):
+            raise ZoteroClientError(
+                f"Web API remove from collection failed: HTTP {response.status_code} — "
+                f"{response.text[:500]}",
+                response.status_code,
+            )
+        return {
+            "removed": True,
+            "item_key": item_key,
+            "collection_key": collection_key,
+            "via": "web_api",
+        }
 
     def fetch_item_citation(
         self,

@@ -389,7 +389,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.0.7';
+    var SIDEBAR_VERSION = '2.0.8';
 
     var lastImport = { doi: '', orcid: '', itemKey: '', citationText: '', identifiers: null };
     var duplicateItem = null;
@@ -632,29 +632,49 @@
       return truncateTitle(text, max);
     }
 
-    function formatAuthorsSnippet(creators, maxAuthors) {
-      maxAuthors = maxAuthors || 2;
-      var names = [];
+    function formatFirstAuthor(creators) {
       var list = creators || [];
-      if (!Array.isArray(list)) {
+      if (!Array.isArray(list) || !list.length) {
         return typeof list === 'string' ? list : '';
       }
-      list.forEach(function (c) {
-        if (typeof c === 'string') {
-          names.push(c);
-        } else if (c && typeof c === 'object') {
-          var part = String(c.lastName || c.last_name || c.name || '').trim();
-          var first = String(c.firstName || c.first_name || '').trim();
-          if (first && part) part = first.charAt(0) + '. ' + part;
-          else if (!part) part = first;
-          if (part) names.push(part);
-        }
-      });
-      if (!names.length) return '';
-      var shown = names.slice(0, maxAuthors);
-      var text = shown.join(', ');
-      if (names.length > maxAuthors) text += ' i in.';
-      return text;
+      var c = list[0];
+      if (typeof c === 'string') return c;
+      if (!c || typeof c !== 'object') return '';
+      var family = String(c.lastName || c.last_name || c.name || '').trim();
+      var given = String(c.firstName || c.first_name || '').trim();
+      if (family && given) return family + ' ' + given.charAt(0) + '.';
+      return family || given;
+    }
+
+    function formatItemDate(dateStr) {
+      dateStr = String(dateStr || '').trim();
+      if (!dateStr) return '';
+      if (/^\d{4}$/.test(dateStr)) return dateStr;
+      var match = dateStr.match(/^(\d{4})/);
+      return match ? match[1] : dateStr;
+    }
+
+    function formatItemMetaLine(item) {
+      var parts = [];
+      var author = formatFirstAuthor(item.creators || item.authors);
+      if (author) parts.push(author);
+      var date = formatItemDate(item.date || item.year);
+      if (date) parts.push(date);
+      if (item.doi) {
+        var doi = String(item.doi);
+        if (doi.length > 24) doi = doi.substring(0, 22) + '…';
+        parts.push(doi);
+      }
+      return parts.join(' · ');
+    }
+
+    function appendItemMeta(parent, item) {
+      var metaText = formatItemMetaLine(item);
+      if (!metaText) return;
+      var meta = document.createElement('div');
+      meta.className = 'collection-item-meta';
+      meta.textContent = metaText;
+      parent.appendChild(meta);
     }
 
     var studyOverviewState = {
@@ -669,6 +689,7 @@
         String(item.title || ''),
         String(item.journal_abbrev || ''),
         String(item.doi || ''),
+        String(item.date || item.year || ''),
         String(item.key || item.item_key || ''),
       ];
       var creators = item.creators || item.authors || [];
@@ -732,10 +753,11 @@
         if (item.citation_text) {
           title.title = item.citation_text;
         }
+        appendItemMeta(title, item);
 
         var btn = document.createElement('button');
         btn.type = 'button';
-        btn.textContent = 'Wstaw cytowanie';
+        btn.textContent = 'Wstaw';
         btn.onclick = (function (it) {
           return function () {
             var key = it.key || it.item_key || '';
@@ -918,17 +940,7 @@
         title.textContent = formatDisplayTitle(item);
         if (item.citation_text) title.title = item.citation_text;
         body.appendChild(title);
-
-        var metaParts = [];
-        var authors = formatAuthorsSnippet(item.creators || item.authors);
-        if (authors) metaParts.push(authors);
-        if (item.doi) metaParts.push('DOI: ' + item.doi);
-        if (metaParts.length) {
-          var meta = document.createElement('div');
-          meta.className = 'collection-item-meta';
-          meta.textContent = metaParts.join(' · ');
-          body.appendChild(meta);
-        }
+        appendItemMeta(body, item);
 
         var btn = document.createElement('button');
         btn.type = 'button';

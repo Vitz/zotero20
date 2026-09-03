@@ -1,7 +1,7 @@
 # Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
-Wersja plików Apps Script: **2.0.7** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+Wersja plików Apps Script: **2.0.8** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
 
 ## Co robi panel
 

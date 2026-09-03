@@ -1,7 +1,7 @@
 # Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
-Wersja plików Apps Script: **2.0.0** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+Wersja plików Apps Script: **2.0.5** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
 
 ## Co robi panel
 
@@ -101,7 +101,7 @@ nie będą działać, nawet gdy GitHub Actions pokazuje udany deploy.
 | „Brak cytowań w dokumencie…” przy bibliografii | W dokumencie nie ma kotwic (np. tekst wklejony ręcznie albo cytowania z wersji 1.x) | Wstaw cytowania przyciskiem **Wstaw cytowanie** |
 | Bibliografia z całej kolekcji zamiast cytowanych | Włączony przełącznik **Wstaw CAŁĄ kolekcję** | Zakładka Cytowania → rozwiń „Tryb awaryjny” → odznacz |
 | „Nie widzę kursora w dokumencie” | Kursor nigdy nie był ustawiony w tekście | Kliknij w dokument w miejscu cytowania, potem **Wstaw cytowanie** |
-| „Brak [*]” | Tryb `[*]`, brak placeholdera | Wpisz `[*]` albo przełącz tryb na „w miejscu kursora” |
+| „Brak placeholdera” | Tryb placeholderów, brak dopasowania w tekście | Wpisz `[*]`, `[DOI]`, `[10.xxxx/…]` lub `[DOI:10.xxxx/…]`, albo przełącz tryb na „w miejscu kursora” |
 | „Brak bibliografii w dokumencie” przy odświeżaniu | Sekcja została usunięta z dokumentu | Użyj **Wstaw bibliografię** |
 | Pusta lista kolekcji | Serwer bez `ZOTERO_WEB_API_KEY` albo pusta biblioteka Docker | Sprawdź `GET /api/v1/collections` (`"source"` = `"web"`), albo wpisz klucz kolekcji ręcznie |
 | „Nieprawidłowy klucz API” | Zły `ZOTERO20_API_KEY` | Ustaw ten sam klucz co w `.env` na serwerze |

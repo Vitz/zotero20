@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.0.4';
+const ADDON_VERSION = '2.0.5';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -679,9 +679,13 @@ function insertCitationForItem(itemKey, identifiers, mode) {
   }
 
   mode = mode === 'placeholder' || mode === 'cursor' ? mode : getCitationInsertMode();
+  var placeholderIds = identifiers || {};
+  if (mode === 'placeholder') {
+    placeholderIds = enrichIdentifiersForPlaceholder_(placeholderIds, key);
+  }
   var placement =
     mode === 'placeholder'
-      ? replacePlaceholderInDocument_(citationText, identifiers || {}, key)
+      ? replacePlaceholderInDocument_(citationText, placeholderIds, key)
       : insertCitationAtCursor_(citationText, key);
 
   var result = {
@@ -739,8 +743,8 @@ function replacePlaceholderInDocument_(text, identifiers, itemKey) {
   }
 
   throw new Error(
-    'Brak [*] — wpisz placeholder w dokumencie (np. [*] lub [DOI]) i spróbuj ponownie, ' +
-    'albo przełącz wstawianie na „w miejscu kursora”.'
+    'Brak placeholdera w dokumencie — wpisz np. [*], [DOI], [10.xxxx/…] albo [DOI:10.xxxx/…] ' +
+    'i spróbuj ponownie, albo przełącz wstawianie na „w miejscu kursora”.'
   );
 }
 
@@ -1026,42 +1030,102 @@ function loadLegacyCitationRanges_() {
 
 function buildPlaceholderPatterns_(identifiers) {
   var patterns = ['[*]'];
-  var type = identifiers.type || '';
+  var type = String(identifiers.type || '').toLowerCase();
   var value = String(identifiers.value || '').trim();
 
   if (type === 'doi' && value) {
-    patterns.push('[doi]', '[' + value + ']', '[doi:' + value + ']');
-    var bare = value.replace(/^doi:/i, '');
-    if (bare !== value) {
-      patterns.push('[' + bare + ']');
-    }
+    addDoiPlaceholderPatterns_(patterns, value);
   } else if (type === 'orcid' && value) {
-    patterns.push('[orcid]', '[' + value + ']');
+    patterns.push('[orcid]', '[ORCID]', '[' + value + ']');
   } else if (type === 'pmid' && value) {
-    patterns.push('[pmid]', '[' + value + ']');
+    patterns.push('[pmid]', '[PMID]', '[' + value + ']');
   } else if (value) {
-    patterns.push('[' + value + ']');
+    var maybeDoi = normalizeDoiIdentifier_(value);
+    if (maybeDoi) {
+      addDoiPlaceholderPatterns_(patterns, maybeDoi);
+    } else {
+      patterns.push('[' + value + ']');
+    }
   }
 
   if (identifiers.extra && identifiers.extra.length) {
     for (var j = 0; j < identifiers.extra.length; j++) {
       var extra = String(identifiers.extra[j] || '').trim();
-      if (extra) {
-        patterns.push('[' + extra + ']');
+      if (!extra) continue;
+      var extraDoi = normalizeDoiIdentifier_(extra);
+      if (extraDoi) {
+        addDoiPlaceholderPatterns_(patterns, extraDoi);
+      } else {
+        pushUniquePattern_(patterns, '[' + extra + ']');
       }
     }
   }
 
-  var seen = {};
-  return patterns.filter(function (p) {
-    if (seen[p]) return false;
-    seen[p] = true;
-    return true;
-  });
+  return patterns;
+}
+
+function addDoiPlaceholderPatterns_(patterns, rawValue) {
+  var doi = normalizeDoiIdentifier_(rawValue);
+  if (!doi) return;
+  pushUniquePattern_(patterns, '[doi]');
+  pushUniquePattern_(patterns, '[DOI]');
+  pushUniquePattern_(patterns, '[' + doi + ']');
+  pushUniquePattern_(patterns, '[doi:' + doi + ']');
+  pushUniquePattern_(patterns, '[DOI:' + doi + ']');
+  var raw = String(rawValue || '').trim();
+  if (raw && raw.toLowerCase() !== doi.toLowerCase()) {
+    pushUniquePattern_(patterns, '[' + raw + ']');
+    pushUniquePattern_(patterns, '[doi:' + raw + ']');
+    pushUniquePattern_(patterns, '[DOI:' + raw + ']');
+  }
+}
+
+function pushUniquePattern_(patterns, pattern) {
+  if (!pattern || patterns.indexOf(pattern) >= 0) return;
+  patterns.push(pattern);
+}
+
+function normalizeDoiIdentifier_(value) {
+  var v = String(value || '').trim();
+  if (!v) return '';
+  v = v.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '');
+  v = v.replace(/^doi:\s*/i, '');
+  return v.trim();
+}
+
+function enrichIdentifiersForPlaceholder_(identifiers, itemKey) {
+  identifiers = identifiers || {};
+  var type = String(identifiers.type || '').toLowerCase();
+  var value = String(identifiers.value || '').trim();
+  if (type === 'doi' && value) {
+    return { type: 'doi', value: normalizeDoiIdentifier_(value) || value, extra: identifiers.extra };
+  }
+  if (!type && value) {
+    var inferred = normalizeDoiIdentifier_(value);
+    if (inferred) {
+      return { type: 'doi', value: inferred, extra: identifiers.extra };
+    }
+    return identifiers;
+  }
+  var key = normalizeItemKey_(itemKey);
+  if (!key) return identifiers;
+  try {
+    var data = apiGet('/items/' + encodeURIComponent(key));
+    var doi = normalizeDoiIdentifier_(data.doi || (data.item && data.item.doi) || '');
+    if (doi) {
+      return { type: 'doi', value: doi, extra: identifiers.extra };
+    }
+  } catch (e) {
+    // Brak DOI w metadanych — zostaw identyfikatory bez zmian.
+  }
+  return identifiers;
 }
 
 function buildIdentifiers_(type, value) {
-  return { type: type, value: String(value || '').trim() };
+  var normalized = String(type || '').toLowerCase() === 'doi'
+    ? normalizeDoiIdentifier_(value)
+    : String(value || '').trim();
+  return { type: type, value: normalized || String(value || '').trim() };
 }
 
 function replaceFirstLiteral_(element, searchText, replacementText) {

@@ -286,7 +286,7 @@
     <label for="insert-mode">Gdzie wstawiać cytowanie</label>
     <select id="insert-mode" onchange="persistInsertMode()">
       <option value="cursor">W miejscu kursora w dokumencie</option>
-      <option value="placeholder">Zamiast [*] w tekście</option>
+      <option value="placeholder">Zamiast [*] lub [DOI] w tekście</option>
     </select>
 
     <button id="btn-insert-biblio" type="button" onclick="doInsertBibliography()" disabled>Wstaw bibliografię</button>
@@ -354,7 +354,7 @@
     <p id="post-import-summary"></p>
     <button type="button" onclick="pasteLastImport()">Wstaw cytowanie</button>
     <p class="hint">
-      Cytowanie trafia w miejsce kursora (albo zamiast <strong>[*]</strong> — zależnie od trybu w zakładce Cytowania)
+      Cytowanie trafia w miejsce kursora (albo zamiast <strong>[*]</strong> / <strong>[DOI]</strong> / <strong>[10.xxxx/…]</strong> — zależnie od trybu w zakładce Cytowania)
       i zostaje <strong>śledzone</strong>: zmiana stylu przelicza je razem z bibliografią.
       Śledzenie przeżywa zamknięcie dokumentu, kopiowanie tekstu i kopię pliku.
     </p>
@@ -373,7 +373,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.0.4';
+    var SIDEBAR_VERSION = '2.0.5';
 
     var lastImport = { doi: '', orcid: '', itemKey: '', citationText: '', identifiers: null };
     var duplicateItem = null;
@@ -573,7 +573,7 @@
       setPasteButtonsDisabled(true);
       setStatus(
         appState.insertMode === 'placeholder'
-          ? 'Szukam [*] w dokumencie…'
+          ? 'Szukam placeholdera ([*], [DOI], [10.xxxx/…]) w dokumencie…'
           : 'Wstawiam cytowanie w miejscu kursora…',
         false
       );

@@ -51,17 +51,17 @@ to zabezpieczenie przed „naprawami, które nie działają, bo w Docs jest star
 | Klucz | Wartość |
 |-------|---------|
 | `ZOTERO20_API_KEY` | klucz z `server/.env` (wymagany) |
-| `ZOTERO20_DEFAULT_COLLECTION_KEY` | 8-znakowy klucz kolekcji Zotero (ustawiany w panelu) |
-| `ZOTERO20_DEFAULT_COLLECTION_NAME` | nazwa kolekcji (cache do wyświetlania) |
+| `ZOTERO20_DEBUG` | opcjonalnie `true` — tryb diagnostyczny |
 
 Ustawienia per dokument (Document Properties, ustawiane z panelu):
+`ZOTERO20_DEFAULT_COLLECTION_KEY`, `ZOTERO20_DEFAULT_COLLECTION_NAME`,
 `ZOTERO20_BIBLIOGRAPHY_STYLE`, `ZOTERO20_BIBLIOGRAPHY_CITED_ONLY`, `ZOTERO20_CITATION_INSERT_MODE`.
-Styl był wcześniej globalny (Script Properties) i przeciekał między dokumentami — teraz jest
-migrowany do właściwości dokumentu przy pierwszym odczycie.
+Kolekcja i styl były wcześniej globalne (Script Properties) i przeciekały między dokumentami —
+przy pierwszym odczycie w danym dokumencie wartość z Script Properties jest kopiowana do Document Properties.
 
 ## Użycie
 
-1. **Jednorazowo:** zakładka **Ustawienia** → wybierz domyślną kolekcję Zotero → **Zapisz**.
+1. **W każdym dokumencie:** zakładka **Ustawienia** → wybierz kolekcję tego dokumentu → **Zapisz**.
 2. Zakładka **Cytowania** → wybierz styl CSL i tryb wstawiania (kursor / `[*]`).
 3. Zakładka **DOI** → zaimportuj pracę.
 4. Ustaw kursor w dokumencie → **Wstaw cytowanie**. Cytowanie zostaje kotwicą.

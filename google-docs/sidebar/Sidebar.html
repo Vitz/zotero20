@@ -189,12 +189,13 @@
   </div>
 
   <div id="tab-settings" class="tab active">
-    <p>Wybierz domyślną kolekcję Zotero <strong>raz</strong> — każdy import trafi tam automatycznie.</p>
-    <label for="default-collection">Domyślna kolekcja</label>
+    <p>Wybierz kolekcję Zotero <strong>dla tego dokumentu</strong> — każdy import trafi tam automatycznie.
+      Nowy dokument może mieć inną kolekcję niż poprzedni.</p>
+    <label for="default-collection">Kolekcja tego dokumentu</label>
     <select id="default-collection" disabled>
       <option value="">Ładowanie kolekcji…</option>
     </select>
-    <button id="btn-save-default" type="button" onclick="saveDefaultCollection()" disabled>Zapisz domyślną kolekcję</button>
+    <button id="btn-save-default" type="button" onclick="saveDefaultCollection()" disabled>Zapisz kolekcję dokumentu</button>
     <p id="collections-source-hint" class="hint" style="font-size:11px;color:#555;margin-top:8px;">
       Ładowanie źródła kolekcji…
     </p>
@@ -233,7 +234,7 @@
 
   <div id="tab-doi" class="tab">
     <div id="current-collection-doi" class="current-collection" style="display:none;">
-      <strong>Domyślna kolekcja</strong>
+      <strong>Kolekcja tego dokumentu</strong>
       <span id="current-collection-doi-label"></span>
     </div>
     <label for="doi">DOI</label>
@@ -248,7 +249,7 @@
 
   <div id="tab-orcid" class="tab">
     <div id="current-collection-orcid" class="current-collection" style="display:none;">
-      <strong>Domyślna kolekcja</strong>
+      <strong>Kolekcja tego dokumentu</strong>
       <span id="current-collection-orcid-label"></span>
     </div>
     <label for="orcid">ORCID</label>
@@ -265,7 +266,7 @@
 
   <div id="tab-biblio" class="tab">
     <div id="current-collection-biblio" class="current-collection" style="display:none;">
-      <strong>Domyślna kolekcja</strong>
+      <strong>Kolekcja tego dokumentu</strong>
       <span id="current-collection-biblio-label"></span>
     </div>
     <div id="citation-summary">Sprawdzam cytowania w dokumencie…</div>
@@ -315,7 +316,7 @@
 
   <div id="tab-kolekcja" class="tab">
     <div id="current-collection-kolekcja" class="current-collection" style="display:none;">
-      <strong>Domyślna kolekcja</strong>
+      <strong>Kolekcja tego dokumentu</strong>
       <span id="current-collection-kolekcja-label"></span>
     </div>
     <p class="hint" style="font-size:11px;color:#555;margin-top:0;">
@@ -372,7 +373,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.0.3';
+    var SIDEBAR_VERSION = '2.0.4';
 
     var lastImport = { doi: '', orcid: '', itemKey: '', citationText: '', identifiers: null };
     var duplicateItem = null;
@@ -969,7 +970,7 @@
           empty.style.display = 'block';
           empty.textContent = appState.defaultCollection.key
             ? 'Brak pozycji w kolekcji.'
-            : 'Ustaw domyślną kolekcję w zakładce Ustawienia.';
+            : 'Ustaw kolekcję tego dokumentu w zakładce Ustawienia.';
         }
         document.getElementById('kolekcja-list').innerHTML = '';
         if (dedupNote) dedupNote.style.display = 'none';
@@ -1015,7 +1016,7 @@
 
     function removeKolekcjaItem(item) {
       if (!appState.defaultCollection.key) {
-        setStatus('Ustaw domyślną kolekcję w zakładce Ustawienia.', true);
+        setStatus('Ustaw kolekcję tego dokumentu w zakładce Ustawienia.', true);
         showTab('settings');
         return;
       }
@@ -1263,7 +1264,7 @@
     function runBibliographyAction(actionName, actionLabel) {
       var wholeCollection = isWholeCollectionMode();
       if (wholeCollection && !appState.defaultCollection.key) {
-        setStatus('Tryb „cała kolekcja” wymaga domyślnej kolekcji — ustaw ją w zakładce Ustawienia.', true);
+        setStatus('Tryb „cała kolekcja” wymaga kolekcji tego dokumentu — ustaw ją w zakładce Ustawienia.', true);
         showTab('settings');
         return;
       }
@@ -1382,7 +1383,7 @@
       setImportEnabled(hasDefault);
       if (!hasDefault) {
         showSetupWarning(
-          '<strong>Ustaw domyślną kolekcję</strong> w zakładce Ustawienia — ' +
+          '<strong>Ustaw kolekcję tego dokumentu</strong> w zakładce Ustawienia — ' +
           'bez tego import nie zadziała.'
         );
         showTab('settings');
@@ -1447,7 +1448,7 @@
         sel.innerHTML = '';
         var none = document.createElement('option');
         none.value = '';
-        none.textContent = '— użyj domyślnej kolekcji —';
+        none.textContent = '— użyj kolekcji dokumentu —';
         none.selected = true;
         sel.appendChild(none);
         configured.forEach(function (s) {
@@ -1550,7 +1551,7 @@
           fillCollectionSelect('default-collection', appState.defaultCollection.key);
           updateCurrentCollectionLabels();
           loadStudyOverview();
-          setStatus('Zapisano domyślną kolekcję: ' + saved.name);
+          setStatus('Zapisano kolekcję dokumentu: ' + saved.name);
         })
         .withFailureHandler(function (e) {
           setStatus(e.message, true);
@@ -1564,7 +1565,7 @@
         return { study: study };
       }
       if (!appState.defaultCollection.key) {
-        setStatus('Ustaw domyślną kolekcję w zakładce Ustawienia.', true);
+        setStatus('Ustaw kolekcję tego dokumentu w zakładce Ustawienia.', true);
         showTab('settings');
         return null;
       }
@@ -1668,7 +1669,7 @@
       loadCitationSummary();
       loadStudyOverview();
       loadDebugMode();
-      setStatus('Wybierz domyślną kolekcję w Ustawieniach (jednorazowo).');
+      setStatus('Wybierz kolekcję tego dokumentu w zakładce Ustawienia.');
     }
 
     boot();

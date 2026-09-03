@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.0.3';
+const ADDON_VERSION = '2.0.4';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -50,12 +50,23 @@ function getStudies() {
   return apiGet('/studies');
 }
 
+/** Kolekcja importu jest przypisana do dokumentu — każdy Google Doc może mieć inną. */
 function getDefaultCollection() {
-  const props = PropertiesService.getScriptProperties();
-  return {
-    key: props.getProperty(PROP_DEFAULT_COLLECTION_KEY) || '',
-    name: props.getProperty(PROP_DEFAULT_COLLECTION_NAME) || '',
-  };
+  var docProps = PropertiesService.getDocumentProperties();
+  var key = docProps.getProperty(PROP_DEFAULT_COLLECTION_KEY);
+  var name = docProps.getProperty(PROP_DEFAULT_COLLECTION_NAME);
+  if (key) {
+    return { key: key, name: name || key };
+  }
+  // Wcześniej kolekcja była globalna (ScriptProperties) i „przeciekała” między dokumentami.
+  var legacyKey = PropertiesService.getScriptProperties().getProperty(PROP_DEFAULT_COLLECTION_KEY);
+  var legacyName = PropertiesService.getScriptProperties().getProperty(PROP_DEFAULT_COLLECTION_NAME);
+  if (legacyKey) {
+    docProps.setProperty(PROP_DEFAULT_COLLECTION_KEY, legacyKey);
+    docProps.setProperty(PROP_DEFAULT_COLLECTION_NAME, legacyName || legacyKey);
+    return { key: legacyKey, name: legacyName || legacyKey };
+  }
+  return { key: '', name: '' };
 }
 
 function saveDefaultCollection(key, name) {
@@ -68,9 +79,9 @@ function saveDefaultCollection(key, name) {
       'Klucz kolekcji musi mieć dokładnie 8 znaków (litery i cyfry), np. FVIAD3D8 z adresu zotero.org.'
     );
   }
-  const props = PropertiesService.getScriptProperties();
-  props.setProperty(PROP_DEFAULT_COLLECTION_KEY, key);
-  props.setProperty(PROP_DEFAULT_COLLECTION_NAME, name || key);
+  var docProps = PropertiesService.getDocumentProperties();
+  docProps.setProperty(PROP_DEFAULT_COLLECTION_KEY, key);
+  docProps.setProperty(PROP_DEFAULT_COLLECTION_NAME, name || key);
   return getDefaultCollection();
 }
 
@@ -355,7 +366,7 @@ function upsertBibliography_(isRefresh, citedOnly) {
 
   var collection = getDefaultCollection();
   if (!collection.key) {
-    throw new Error('Tryb „cała kolekcja” wymaga domyślnej kolekcji — ustaw ją w zakładce Ustawienia.');
+    throw new Error('Tryb „cała kolekcja” wymaga kolekcji tego dokumentu — ustaw ją w zakładce Ustawienia.');
   }
 
   var data = apiPost('/bibliography', { style: style, collection_key: collection.key });

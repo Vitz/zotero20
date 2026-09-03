@@ -389,7 +389,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.0.6';
+    var SIDEBAR_VERSION = '2.0.7';
 
     var lastImport = { doi: '', orcid: '', itemKey: '', citationText: '', identifiers: null };
     var duplicateItem = null;
@@ -625,6 +625,13 @@
       return title.substring(0, max) + '…';
     }
 
+    function formatDisplayTitle(item, max) {
+      var title = String(item.title || '').trim();
+      var abbrev = String(item.journal_abbrev || '').trim();
+      var text = abbrev ? '[' + abbrev + '] ' + title : title;
+      return truncateTitle(text, max);
+    }
+
     function formatAuthorsSnippet(creators, maxAuthors) {
       maxAuthors = maxAuthors || 2;
       var names = [];
@@ -660,6 +667,7 @@
     function studyItemSearchText(item) {
       var parts = [
         String(item.title || ''),
+        String(item.journal_abbrev || ''),
         String(item.doi || ''),
         String(item.key || item.item_key || ''),
       ];
@@ -720,7 +728,7 @@
 
         var title = document.createElement('div');
         title.className = 'study-title';
-        title.textContent = truncateTitle(item.title);
+        title.textContent = formatDisplayTitle(item);
         if (item.citation_text) {
           title.title = item.citation_text;
         }
@@ -907,7 +915,7 @@
         body.className = 'study-title';
 
         var title = document.createElement('div');
-        title.textContent = truncateTitle(item.title);
+        title.textContent = formatDisplayTitle(item);
         if (item.citation_text) title.title = item.citation_text;
         body.appendChild(title);
 

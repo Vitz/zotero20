@@ -5,6 +5,7 @@
     "data": {
       "itemType": "journalArticle",
       "title": "Test Article About Nature",
+      "journalAbbreviation": "Nature",
       "DOI": "10.1038/nature12373",
       "date": "2013-08-14",
       "creators": [

@@ -58,6 +58,7 @@ class ZoteroClient:
         return {
             "key": entry.get("key", ""),
             "title": data.get("title", ""),
+            "journal_abbrev": (data.get("journalAbbreviation") or "").strip(),
             "doi": data.get("DOI", ""),
             "date": data.get("date", ""),
             "itemType": data.get("itemType", ""),

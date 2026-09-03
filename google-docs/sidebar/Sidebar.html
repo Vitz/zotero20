@@ -26,6 +26,40 @@
       font-size: 12px;
     }
     #study-overview h3 { margin: 0 0 8px; font-size: 13px; }
+    #study-overview-search-wrap {
+      position: relative;
+      margin-bottom: 6px;
+    }
+    #study-overview-search {
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 0;
+      padding: 6px 28px 6px 6px;
+      font-size: 12px;
+    }
+    #study-overview-search-clear {
+      position: absolute;
+      right: 2px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: auto;
+      margin: 0;
+      padding: 2px 8px;
+      font-size: 16px;
+      line-height: 1;
+      background: transparent;
+      border: none;
+      color: #666;
+      cursor: pointer;
+      display: none;
+    }
+    #study-overview-search-clear.visible { display: block; }
+    #study-overview-filter-count {
+      font-size: 11px;
+      color: #555;
+      margin: 0 0 6px;
+      display: none;
+    }
     .study-row {
       display: flex;
       align-items: flex-start;
@@ -289,13 +323,18 @@
 
   <div id="study-overview" style="display:none;">
     <h3>Pozycje w kolekcji</h3>
+    <div id="study-overview-search-wrap">
+      <input id="study-overview-search" type="search" placeholder="Szukaj po tytule, autorze, DOI…" autocomplete="off" spellcheck="false">
+      <button type="button" id="study-overview-search-clear" title="Wyczyść" aria-label="Wyczyść">×</button>
+    </div>
+    <p id="study-overview-filter-count"></p>
     <p id="study-doi-dedup-note" class="hint" style="font-size:11px;color:#555;display:none;"></p>
     <div id="study-overview-list"></div>
   </div>
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.0.1';
+    var SIDEBAR_VERSION = '2.0.2';
 
     var lastImport = { doi: '', orcid: '', itemKey: '', citationText: '', identifiers: null };
     var duplicateItem = null;
@@ -530,30 +569,69 @@
       return title.substring(0, max) + '…';
     }
 
-    function renderStudyOverview(items, meta) {
-      meta = meta || {};
-      var box = document.getElementById('study-overview');
+    var studyOverviewState = {
+      allItems: [],
+      meta: {},
+      searchQuery: '',
+      searchTimer: null,
+    };
+
+    function studyItemSearchText(item) {
+      var parts = [
+        String(item.title || ''),
+        String(item.doi || ''),
+        String(item.key || item.item_key || ''),
+      ];
+      var creators = item.creators || item.authors || [];
+      if (Array.isArray(creators)) {
+        creators.forEach(function (c) {
+          if (typeof c === 'string') {
+            parts.push(c);
+          } else if (c && typeof c === 'object') {
+            parts.push(String(c.lastName || c.last_name || ''));
+            parts.push(String(c.firstName || c.first_name || ''));
+            if (c.name) parts.push(String(c.name));
+          }
+        });
+      } else if (typeof creators === 'string') {
+        parts.push(creators);
+      }
+      return parts.join(' ').toLowerCase();
+    }
+
+    function filterStudyItems(items, query) {
+      query = String(query || '').trim().toLowerCase();
+      if (!query) return items;
+      return items.filter(function (item) {
+        return studyItemSearchText(item).indexOf(query) !== -1;
+      });
+    }
+
+    function updateStudyFilterCount(visible, total, filtering) {
+      var el = document.getElementById('study-overview-filter-count');
+      if (!el) return;
+      if (filtering && total > 0) {
+        el.style.display = 'block';
+        el.textContent = visible + ' z ' + total + ' pozycji';
+      } else {
+        el.style.display = 'none';
+        el.textContent = '';
+      }
+    }
+
+    function updateStudySearchClearButton() {
+      var input = document.getElementById('study-overview-search');
+      var btn = document.getElementById('study-overview-search-clear');
+      if (!input || !btn) return;
+      if (input.value.trim()) {
+        btn.classList.add('visible');
+      } else {
+        btn.classList.remove('visible');
+      }
+    }
+
+    function renderStudyOverviewRows(items) {
       var list = document.getElementById('study-overview-list');
-      var dedupNote = document.getElementById('study-doi-dedup-note');
-      if (!items || !items.length) {
-        box.style.display = 'none';
-        list.innerHTML = '';
-        if (dedupNote) dedupNote.style.display = 'none';
-        return;
-      }
-      if (dedupNote) {
-        if (meta.hidden_duplicate_dois) {
-          dedupNote.style.display = 'block';
-          dedupNote.innerHTML =
-            'Ukryto ' + meta.hidden_duplicate_dois + ' duplikat(ów) DOI. ' +
-            (meta.doi_dedup_note ||
-              'Zotero nie blokuje duplikatów DOI w kolekcji — panel pokazuje jedną pozycję na DOI.');
-        } else {
-          dedupNote.style.display = 'block';
-          dedupNote.textContent =
-            'Zotero nie blokuje natywnie duplikatów DOI w kolekcji — ten panel ukrywa powtórki na liście.';
-        }
-      }
       list.innerHTML = '';
       items.forEach(function (item) {
         var row = document.createElement('div');
@@ -581,6 +659,78 @@
         row.appendChild(btn);
         list.appendChild(row);
       });
+    }
+
+    function applyStudyOverviewFilter() {
+      var query = studyOverviewState.searchQuery;
+      var allItems = studyOverviewState.allItems;
+      var filtered = filterStudyItems(allItems, query);
+      var filtering = !!String(query || '').trim();
+      updateStudyFilterCount(filtered.length, allItems.length, filtering);
+      renderStudyOverviewRows(filtered);
+    }
+
+    function onStudyOverviewSearchInput() {
+      var input = document.getElementById('study-overview-search');
+      if (!input) return;
+      updateStudySearchClearButton();
+      clearTimeout(studyOverviewState.searchTimer);
+      studyOverviewState.searchTimer = setTimeout(function () {
+        studyOverviewState.searchQuery = input.value;
+        applyStudyOverviewFilter();
+      }, 150);
+    }
+
+    function clearStudyOverviewSearch() {
+      var input = document.getElementById('study-overview-search');
+      if (!input) return;
+      input.value = '';
+      studyOverviewState.searchQuery = '';
+      updateStudySearchClearButton();
+      applyStudyOverviewFilter();
+      input.focus();
+    }
+
+    function initStudyOverviewSearch() {
+      var input = document.getElementById('study-overview-search');
+      var btn = document.getElementById('study-overview-search-clear');
+      if (!input) return;
+      input.addEventListener('input', onStudyOverviewSearchInput);
+      input.addEventListener('search', onStudyOverviewSearchInput);
+      if (btn) {
+        btn.addEventListener('click', clearStudyOverviewSearch);
+      }
+    }
+
+    function renderStudyOverview(items, meta) {
+      meta = meta || {};
+      var box = document.getElementById('study-overview');
+      var dedupNote = document.getElementById('study-doi-dedup-note');
+      if (!items || !items.length) {
+        box.style.display = 'none';
+        studyOverviewState.allItems = [];
+        studyOverviewState.meta = {};
+        document.getElementById('study-overview-list').innerHTML = '';
+        if (dedupNote) dedupNote.style.display = 'none';
+        updateStudyFilterCount(0, 0, false);
+        return;
+      }
+      studyOverviewState.allItems = items;
+      studyOverviewState.meta = meta;
+      if (dedupNote) {
+        if (meta.hidden_duplicate_dois) {
+          dedupNote.style.display = 'block';
+          dedupNote.innerHTML =
+            'Ukryto ' + meta.hidden_duplicate_dois + ' duplikat(ów) DOI. ' +
+            (meta.doi_dedup_note ||
+              'Zotero nie blokuje duplikatów DOI w kolekcji — panel pokazuje jedną pozycję na DOI.');
+        } else {
+          dedupNote.style.display = 'block';
+          dedupNote.textContent =
+            'Zotero nie blokuje natywnie duplikatów DOI w kolekcji — ten panel ukrywa powtórki na liście.';
+        }
+      }
+      applyStudyOverviewFilter();
       box.style.display = 'block';
     }
 
@@ -1225,6 +1375,7 @@
     }
 
     function boot() {
+      initStudyOverviewSearch();
       setStatus('Ładowanie…');
       checkAddonVersion();
       loadDefaultCollection();

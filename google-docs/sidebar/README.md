@@ -1,7 +1,7 @@
 # Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
-Wersja plików Apps Script: **2.1.2** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+Wersja plików Apps Script: **2.1.3** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
 
 ## Co robi panel
 
@@ -61,18 +61,20 @@ to zabezpieczenie przed „naprawami, które nie działają, bo w Docs jest star
 
 Ustawienia per dokument (Document Properties, ustawiane z panelu):
 `ZOTERO20_DEFAULT_COLLECTION_KEY`, `ZOTERO20_DEFAULT_COLLECTION_NAME`,
-`ZOTERO20_BIBLIOGRAPHY_STYLE`, `ZOTERO20_BIBLIOGRAPHY_CITED_ONLY`, `ZOTERO20_CITATION_INSERT_MODE`.
+`ZOTERO20_BIBLIOGRAPHY_STYLE`, `ZOTERO20_BIBLIOGRAPHY_CITED_ONLY`, `ZOTERO20_CITATION_INSERT_MODE`,
+`ZOTERO20_CITATION_LOCALE` (`en-US` albo `pl-PL`; domyślnie `en-US` — „et al.”).
 Kolekcja i styl były wcześniej globalne (Script Properties) i przeciekały między dokumentami —
 przy pierwszym odczycie w danym dokumencie wartość z Script Properties jest kopiowana do Document Properties.
 
 ## Użycie
 
 1. **W każdym dokumencie:** zakładka **Ustawienia** → wybierz kolekcję tego dokumentu → **Zapisz**.
+   Tam też ustaw **Język cytowań** (English = *et al.*, Polski = *i in.*). Panel zostaje po polsku.
 2. Zakładka **Cytowania** → wybierz styl CSL i tryb wstawiania (kursor / `[*]`).
 3. Zakładka **DOI** → zaimportuj pracę.
 4. Ustaw kursor w dokumencie → **Wstaw cytowanie**. Cytowanie zostaje kotwicą.
 5. Zakładka **Cytowania** → **Wstaw bibliografię** (tylko cytowane pozycje).
-6. Zmiana stylu: wybierz inny styl → **Zmień styl (cytowania + bibliografia)**.
+6. Zmiana stylu albo języka cytowań: **Zmień styl (cytowania + bibliografia)** — przelicza istniejące wpisy.
 
 Wstawienie kolejnego cytowania automatycznie przelicza numerację i odświeża bibliografię,
 jeśli już istnieje w dokumencie.
@@ -100,8 +102,8 @@ Panel pokazuje obie kropki statusu (API / Zotero) przy tytule i odświeża je co
 | `GET /health` | liveness API (kropka „API”) |
 | `GET /health/zotero` | połączenie z Zotero (kropka „Zotero”) |
 | `GET /styles` | lista stylów CSL |
-| `GET /items/<key>?style=` | tekst cytowania pojedynczej pozycji |
-| `POST /citations` | cytowania w tekście **i** bibliografia dla listy `item_keys` (jeden styl) |
+| `GET /items/<key>?style=&locale=` | tekst cytowania pojedynczej pozycji (`locale`: `en-US` / `pl-PL`, domyślnie `en-US`) |
+| `POST /citations` | cytowania w tekście **i** bibliografia dla listy `item_keys` (jeden styl + `locale`) |
 | `POST /bibliography` | bibliografia z `item_keys` albo z `collection_key` (tryb awaryjny) |
 
 ## Troubleshooting
@@ -109,6 +111,7 @@ Panel pokazuje obie kropki statusu (API / Zotero) przy tytule i odświeża je co
 | Objaw | Przyczyna | Rozwiązanie |
 |-------|-----------|-------------|
 | Czerwone „Niezgodne wersje plików” | Skopiowano tylko `Code.gs` albo tylko `Sidebar.html` | Skopiuj oba pliki i odśwież dokument |
+| „i in.” zamiast „et al.” w cytowaniu APA | Język cytowań ustawiony na Polski (`pl-PL`) albo stary serwer bez `locale` | Ustawienia → **English — et al.**, potem **Zmień styl** |
 | „Brak cytowań w dokumencie…” przy bibliografii | W dokumencie nie ma kotwic (np. tekst wklejony ręcznie albo cytowania z wersji 1.x) | Wstaw cytowania przyciskiem **Wstaw cytowanie** |
 | Bibliografia z całej kolekcji zamiast cytowanych | Włączony przełącznik **Wstaw CAŁĄ kolekcję** | Zakładka Cytowania → rozwiń „Tryb awaryjny” → odznacz |
 | „Nie widzę kursora w dokumencie” | Kursor nigdy nie był ustawiony w tekście | Kliknij w dokument w miejscu cytowania, potem **Wstaw cytowanie** |

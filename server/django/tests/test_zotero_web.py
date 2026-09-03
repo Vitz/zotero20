@@ -72,6 +72,40 @@ class TestZoteroWebClient:
         client = ZoteroWebClient()
         text = client.fetch_item_citation(ITEM_KEY_1, "apa")
         assert text == "(Smith, 2013)"
+        citation_urls = [
+            call.request.url
+            for call in responses.calls
+            if "format=citation" in call.request.url
+        ]
+        assert citation_urls
+        assert "locale=en-US" in citation_urls[0]
+
+    @responses.activate
+    @override_settings(ZOTERO_WEB_API_KEY="web-test-key", ZOTERO_WEB_USER_ID="12345")
+    def test_fetch_item_citation_sends_requested_locale(self):
+        register_web_api(responses)
+        responses.add(
+            responses.GET,
+            "https://api.zotero.org/users/12345/items/ITEMKEY1",
+            body='<span class="citation">(Smith et al., 2013)</span>',
+            status=200,
+            content_type="text/html",
+            match=[
+                responses.matchers.query_param_matcher(
+                    {"format": "citation", "style": "apa", "locale": "pl-PL"}
+                )
+            ],
+        )
+        client = ZoteroWebClient()
+        text = client.fetch_item_citation(ITEM_KEY_1, "apa", "pl-PL")
+        assert text == "(Smith et al., 2013)"
+        citation_urls = [
+            call.request.url
+            for call in responses.calls
+            if "format=citation" in call.request.url
+        ]
+        assert citation_urls
+        assert "locale=pl-PL" in citation_urls[0]
 
     @responses.activate
     @override_settings(ZOTERO_WEB_API_KEY="web-test-key", ZOTERO_WEB_USER_ID="12345")
@@ -84,7 +118,7 @@ class TestZoteroWebClient:
             body="upstream error",
             match=[
                 responses.matchers.query_param_matcher(
-                    {"format": "citation", "style": "apa", "locale": "pl-PL"}
+                    {"format": "citation", "style": "apa", "locale": "en-US"}
                 )
             ],
         )

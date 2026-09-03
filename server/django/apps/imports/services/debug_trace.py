@@ -4,13 +4,16 @@ from .bibliography import (
     build_document_citations,
     dedupe_item_keys,
     is_numeric_style,
+    resolve_locale,
     resolve_style_id,
     style_label,
 )
 from .exceptions import ZoteroClientError
 
 
-def _trace_fetch_formatted(client, item_keys: list[str], style_id: str) -> tuple[dict, list[dict]]:
+def _trace_fetch_formatted(
+    client, item_keys: list[str], style_id: str, locale: str
+) -> tuple[dict, list[dict]]:
     """Pobiera sformatowane pozycje i zapisuje kroki diagnostyczne."""
     trace: list[dict] = []
     formatted: dict[str, dict[str, str]] = {}
@@ -18,7 +21,7 @@ def _trace_fetch_formatted(client, item_keys: list[str], style_id: str) -> tuple
     batch = getattr(client, "fetch_items_formatted", None)
     if batch is not None:
         try:
-            raw = batch(item_keys, style_id) or {}
+            raw = batch(item_keys, style_id, locale) or {}
             trace.append(
                 {
                     "step": "batch_fetch_items_formatted",
@@ -51,7 +54,7 @@ def _trace_fetch_formatted(client, item_keys: list[str], style_id: str) -> tuple
             continue
         step = {"step": "single_item_bibliography", "item_key": item_key}
         try:
-            bib_html = client.fetch_item_bibliography(item_key, style_id)
+            bib_html = client.fetch_item_bibliography(item_key, style_id, locale)
             from .bibliography import parse_bib_html
 
             parsed = [entry for entry in parse_bib_html(bib_html) if entry.strip()]
@@ -71,20 +74,24 @@ def _trace_fetch_formatted(client, item_keys: list[str], style_id: str) -> tuple
     return formatted, trace
 
 
-def trace_item_citation(client, item_key: str, style: str | None = None) -> list[dict]:
+def trace_item_citation(
+    client, item_key: str, style: str | None = None, locale: str | None = None
+) -> list[dict]:
     """Próbuje pobrać cytowanie każdą dostępną ścieżką (do debug/item)."""
     steps: list[dict] = []
     resolved = resolve_style_id(style) if style else None
+    resolved_locale = resolve_locale(locale)
 
     if resolved:
         fetch = getattr(client, "fetch_item_citation", None)
         if fetch:
             try:
-                text = (fetch(item_key, resolved) or "").strip()
+                text = (fetch(item_key, resolved, resolved_locale) or "").strip()
                 steps.append(
                     {
                         "method": "fetch_item_citation",
                         "style": resolved,
+                        "locale": resolved_locale,
                         "ok": bool(text),
                         "citation_text": text,
                     }
@@ -94,6 +101,7 @@ def trace_item_citation(client, item_key: str, style: str | None = None) -> list
                     {
                         "method": "fetch_item_citation",
                         "style": resolved,
+                        "locale": resolved_locale,
                         "ok": False,
                         "error": str(exc),
                     }
@@ -101,7 +109,9 @@ def trace_item_citation(client, item_key: str, style: str | None = None) -> list
         else:
             steps.append({"method": "fetch_item_citation", "ok": False, "skipped": "not_supported"})
 
-        formatted, fmt_trace = _trace_fetch_formatted(client, [item_key], resolved)
+        formatted, fmt_trace = _trace_fetch_formatted(
+            client, [item_key], resolved, resolved_locale
+        )
         steps.append({"method": "formatted_batch", "trace": fmt_trace, "formatted": formatted})
         if item_key in formatted and formatted[item_key].get("citation"):
             steps.append(
@@ -121,9 +131,12 @@ def trace_item_citation(client, item_key: str, style: str | None = None) -> list
     return steps
 
 
-def build_document_citations_debug(client, source: str, item_keys: list[str], style_id: str) -> dict:
+def build_document_citations_debug(
+    client, source: str, item_keys: list[str], style_id: str, locale: str | None = None
+) -> dict:
     """Jak build_document_citations, ale z polem trace (ścieżka kodu + podsumowanie)."""
     resolved = resolve_style_id(style_id)
+    resolved_locale = resolve_locale(locale)
     ordered = dedupe_item_keys(item_keys)
     numeric = is_numeric_style(resolved)
 
@@ -133,11 +146,12 @@ def build_document_citations_debug(client, source: str, item_keys: list[str], st
             "style": resolved,
             "style_label": style_label(resolved),
             "numeric": numeric,
+            "locale": resolved_locale,
         },
         {"step": "dedupe_item_keys", "input_count": len(item_keys or []), "keys": ordered},
     ]
 
-    payload = build_document_citations(client, source, item_keys, style_id)
+    payload = build_document_citations(client, source, item_keys, style_id, locale)
     trace.append(
         {
             "step": "build_document_citations",

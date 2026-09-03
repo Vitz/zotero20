@@ -1,6 +1,7 @@
 import pytest
 
 from apps.imports.services.bibliography import (
+    DEFAULT_LOCALE,
     DEFAULT_STYLE_ID,
     build_document_citations,
     export_items_bibliography,
@@ -8,6 +9,7 @@ from apps.imports.services.bibliography import (
     list_styles,
     parse_bib_html,
     parse_formatted_items,
+    resolve_locale,
     resolve_style_id,
     strip_leading_number,
     style_label,
@@ -32,6 +34,23 @@ class TestResolveStyleId:
     def test_unknown_style_raises(self):
         with pytest.raises(ValueError, match="Nieobsługiwany styl"):
             resolve_style_id("unknown-style-xyz")
+
+
+class TestResolveLocale:
+    def test_default_locale(self):
+        assert resolve_locale(None) == DEFAULT_LOCALE
+        assert resolve_locale("") == "en-US"
+        assert DEFAULT_LOCALE == "en-US"
+
+    def test_known_locales(self):
+        assert resolve_locale("en-US") == "en-US"
+        assert resolve_locale("pl-PL") == "pl-PL"
+        assert resolve_locale("en_us") == "en-US"
+        assert resolve_locale("PL-pl") == "pl-PL"
+
+    def test_unknown_locale_raises(self):
+        with pytest.raises(ValueError, match="Nieobsługiwany język cytowań"):
+            resolve_locale("de-DE")
 
 
 class TestStyleLabel:
@@ -96,12 +115,12 @@ class FakeBibClient:
             else citations
         )
 
-    def fetch_item_bibliography(self, item_key, style, locale="pl-PL"):
+    def fetch_item_bibliography(self, item_key, style, locale="en-US"):
         if item_key not in self.mapping:
             raise ZoteroClientError("missing", 404)
         return f'<div class="csl-entry">{self.mapping[item_key]}</div>'
 
-    def fetch_item_citation(self, item_key, style, locale="pl-PL"):
+    def fetch_item_citation(self, item_key, style, locale="en-US"):
         return self.citations.get(item_key, "")
 
 
@@ -119,6 +138,7 @@ class TestExportItemsBibliographyOrdering:
         ]
         assert payload["item_keys"] == [ITEM_KEY_1, ITEM_KEY_2]
         assert payload["item_count"] == 2
+        assert payload["locale"] == "en-US"
         assert "citations" not in payload
 
     def test_raises_when_all_items_missing(self):
@@ -201,7 +221,7 @@ class TestBuildDocumentCitations:
                 self.batch_calls = 0
                 self.single_calls = 0
 
-            def fetch_items_formatted(self, item_keys, style, locale="pl-PL"):
+            def fetch_items_formatted(self, item_keys, style, locale="en-US"):
                 self.batch_calls += 1
                 return {
                     key: {"bib": self.mapping[key], "citation": self.citations[key]}
@@ -209,7 +229,7 @@ class TestBuildDocumentCitations:
                     if key in self.mapping
                 }
 
-            def fetch_item_bibliography(self, item_key, style, locale="pl-PL"):
+            def fetch_item_bibliography(self, item_key, style, locale="en-US"):
                 self.single_calls += 1
                 return super().fetch_item_bibliography(item_key, style, locale)
 
@@ -221,7 +241,7 @@ class TestBuildDocumentCitations:
 
     def test_falls_back_to_single_requests_when_batch_fails(self):
         class BrokenBatchClient(FakeBibClient):
-            def fetch_items_formatted(self, item_keys, style, locale="pl-PL"):
+            def fetch_items_formatted(self, item_keys, style, locale="en-US"):
                 raise ZoteroClientError("batch not supported", 400)
 
         payload = build_document_citations(
@@ -231,6 +251,58 @@ class TestBuildDocumentCitations:
             "apa",
         )
         assert len(payload["entries"]) == 2
+
+    def test_default_locale_is_en_us(self):
+        payload = build_document_citations(
+            FakeBibClient(),
+            "local",
+            [ITEM_KEY_1],
+            "apa",
+        )
+        assert payload["locale"] == "en-US"
+
+    def test_passes_locale_to_client(self):
+        class RecordingClient(FakeBibClient):
+            def __init__(self):
+                super().__init__()
+                self.locales = []
+
+            def fetch_item_bibliography(self, item_key, style, locale="en-US"):
+                self.locales.append(locale)
+                return super().fetch_item_bibliography(item_key, style, locale)
+
+            def fetch_item_citation(self, item_key, style, locale="en-US"):
+                self.locales.append(locale)
+                return super().fetch_item_citation(item_key, style, locale)
+
+        client = RecordingClient()
+        payload = build_document_citations(
+            client, "local", [ITEM_KEY_1], "apa", locale="pl-PL"
+        )
+        assert payload["locale"] == "pl-PL"
+        assert client.locales
+        assert all(value == "pl-PL" for value in client.locales)
+
+    def test_passes_locale_to_batch_client(self):
+        class BatchRecordingClient(FakeBibClient):
+            def __init__(self):
+                super().__init__()
+                self.batch_locales = []
+
+            def fetch_items_formatted(self, item_keys, style, locale="en-US"):
+                self.batch_locales.append(locale)
+                return {
+                    key: {"bib": self.mapping[key], "citation": self.citations[key]}
+                    for key in item_keys
+                    if key in self.mapping
+                }
+
+        client = BatchRecordingClient()
+        payload = build_document_citations(
+            client, "local", [ITEM_KEY_1, ITEM_KEY_2], "apa", locale="pl-PL"
+        )
+        assert payload["locale"] == "pl-PL"
+        assert client.batch_locales == ["pl-PL"]
 
 
 class TestStripLeadingNumber:

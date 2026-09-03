@@ -149,6 +149,7 @@ def register_item_citation(
     rsps: responses.RequestsMock,
     item_key: str,
     base_url: str = DEFAULT_BASE,
+    locale: str = "en-US",
 ) -> None:
     rsps.add(
         responses.GET,
@@ -158,7 +159,7 @@ def register_item_citation(
         content_type="text/html",
         match=[
             responses.matchers.query_param_matcher(
-                {"format": "citation", "style": "apa", "locale": "pl-PL"}
+                {"format": "citation", "style": "apa", "locale": locale}
             )
         ],
     )
@@ -169,6 +170,7 @@ def register_item_bibliography(
     item_key: str,
     html_fixture: str,
     base_url: str = DEFAULT_BASE,
+    locale: str = "en-US",
 ) -> None:
     rsps.add(
         responses.GET,
@@ -178,7 +180,7 @@ def register_item_bibliography(
         content_type="text/html",
         match=[
             responses.matchers.query_param_matcher(
-                {"format": "bib", "style": "apa", "locale": "pl-PL"}
+                {"format": "bib", "style": "apa", "locale": locale}
             )
         ],
     )
@@ -188,6 +190,7 @@ def register_collection_bibliography(
     rsps: responses.RequestsMock,
     collection_key: str = COLLECTION_KEY,
     base_url: str = DEFAULT_BASE,
+    locale: str = "en-US",
 ) -> None:
     rsps.add(
         responses.GET,
@@ -197,7 +200,7 @@ def register_collection_bibliography(
         content_type="text/html",
         match=[
             responses.matchers.query_param_matcher(
-                {"format": "bib", "style": "apa", "locale": "pl-PL"}
+                {"format": "bib", "style": "apa", "locale": locale}
             )
         ],
     )
@@ -346,7 +349,7 @@ def register_web_api(
         content_type="text/html",
         match=[
             responses.matchers.query_param_matcher(
-                {"format": "citation", "style": "apa", "locale": "pl-PL"}
+                {"format": "citation", "style": "apa", "locale": "en-US"}
             )
         ],
     )
@@ -358,7 +361,7 @@ def register_web_api(
         content_type="text/html",
         match=[
             responses.matchers.query_param_matcher(
-                {"format": "bib", "style": "apa", "locale": "pl-PL"}
+                {"format": "bib", "style": "apa", "locale": "en-US"}
             )
         ],
     )
@@ -370,7 +373,7 @@ def register_web_api(
         content_type="text/html",
         match=[
             responses.matchers.query_param_matcher(
-                {"format": "bib", "style": "apa", "locale": "pl-PL"}
+                {"format": "bib", "style": "apa", "locale": "en-US"}
             )
         ],
     )

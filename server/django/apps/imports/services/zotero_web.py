@@ -6,7 +6,7 @@ import requests
 from django.conf import settings
 
 from .doi import fetch_crossref_metadata
-from .bibliography import parse_formatted_items, resolve_style_id
+from .bibliography import DEFAULT_LOCALE, parse_formatted_items, resolve_style_id
 from .citation import format_citation_text, parse_citation_html
 from .exceptions import ZoteroClientError
 
@@ -259,7 +259,7 @@ class ZoteroWebClient:
         self,
         item_key: str,
         style: str,
-        locale: str = "pl-PL",
+        locale: str = DEFAULT_LOCALE,
     ) -> str:
         resolved_style = resolve_style_id(style)
         user_id = self.resolve_user_id()
@@ -409,7 +409,7 @@ class ZoteroWebClient:
         self,
         item_key: str,
         style: str,
-        locale: str = "pl-PL",
+        locale: str = DEFAULT_LOCALE,
     ) -> str:
         resolved_style = resolve_style_id(style)
         user_id = self.resolve_user_id()
@@ -431,7 +431,7 @@ class ZoteroWebClient:
         self,
         item_keys: list[str],
         style: str,
-        locale: str = "pl-PL",
+        locale: str = DEFAULT_LOCALE,
     ) -> dict[str, dict[str, str]]:
         """Zbiorczo pobiera bib+citation dla wielu pozycji (jedno żądanie, mapowanie po kluczu)."""
         resolved_style = resolve_style_id(style)
@@ -463,7 +463,7 @@ class ZoteroWebClient:
         self,
         collection_key: str,
         style: str,
-        locale: str = "pl-PL",
+        locale: str = DEFAULT_LOCALE,
     ) -> str:
         user_id = self.resolve_user_id()
         response = self._session.get(

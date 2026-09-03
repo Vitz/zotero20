@@ -282,6 +282,45 @@ class TestCitationsEndpoint:
         assert data["citations"][0]["citation_text"] == "(Kowalski, 2020)"
         assert data["entries"][0].startswith("Kowalski")
         assert data["entries"][1].startswith("Smith")
+        assert data["locale"] == "en-US"
+
+    @responses.activate
+    def test_forwards_locale_to_zotero(self, api_client, auth_headers):
+        register_full_local_api(responses)
+        response = api_client.post(
+            "/api/v1/citations",
+            data=json.dumps(
+                {
+                    "item_keys": [ITEM_KEY_1],
+                    "style": "apa",
+                    "locale": "pl-PL",
+                }
+            ),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["locale"] == "pl-PL"
+        formatted_urls = [
+            call.request.url
+            for call in responses.calls
+            if "include=bib" in call.request.url or "include=bib%2Ccitation" in call.request.url
+        ]
+        assert formatted_urls
+        assert "locale=pl-PL" in formatted_urls[0]
+
+    @responses.activate
+    def test_rejects_unknown_locale(self, api_client, auth_headers):
+        response = api_client.post(
+            "/api/v1/citations",
+            data=json.dumps(
+                {"item_keys": [ITEM_KEY_1], "style": "apa", "locale": "de-DE"}
+            ),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 400
+        assert "język" in response.json()["error"].lower()
 
     @responses.activate
     def test_numeric_style_keeps_citations_and_entries_consistent(
@@ -368,6 +407,44 @@ class TestItemDetailEndpoint:
         data = response.json()
         assert data["citation_text"] == "(Smith, 2013)"
         assert data["style"] == "apa"
+        assert data["locale"] == "en-US"
+        citation_urls = [
+            call.request.url
+            for call in responses.calls
+            if "format=citation" in call.request.url
+        ]
+        assert citation_urls
+        assert "locale=en-US" in citation_urls[0]
+
+    @responses.activate
+    def test_get_item_citation_with_polish_locale(self, api_client, auth_headers):
+        from tests.helpers.zotero_mock import register_item_citation, register_local_zotero_base
+
+        register_local_zotero_base(responses)
+        register_item_citation(responses, ITEM_KEY_1, locale="pl-PL")
+        response = api_client.get(
+            f"/api/v1/items/{ITEM_KEY_1}?style=apa&locale=pl-PL",
+            **auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["locale"] == "pl-PL"
+        assert data["citation_text"] == "(Smith, 2013)"
+        citation_urls = [
+            call.request.url
+            for call in responses.calls
+            if "format=citation" in call.request.url
+        ]
+        assert citation_urls
+        assert "locale=pl-PL" in citation_urls[0]
+
+    @responses.activate
+    def test_get_item_citation_rejects_unknown_locale(self, api_client, auth_headers):
+        response = api_client.get(
+            f"/api/v1/items/{ITEM_KEY_1}?style=apa&locale=xx-YY",
+            **auth_headers,
+        )
+        assert response.status_code == 400
 
     @responses.activate
     def test_get_item_not_found(self, api_client, auth_headers):

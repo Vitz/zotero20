@@ -6,7 +6,7 @@ import time
 import requests
 from django.conf import settings
 
-from .bibliography import parse_formatted_items, resolve_style_id
+from .bibliography import DEFAULT_LOCALE, parse_formatted_items, resolve_style_id
 from .citation import format_citation_text, parse_citation_html
 from .exceptions import ZoteroClientError
 
@@ -203,7 +203,7 @@ class ZoteroClient:
         self,
         item_key: str,
         style: str,
-        locale: str = "pl-PL",
+        locale: str = DEFAULT_LOCALE,
     ) -> str:
         resolved_style = resolve_style_id(style)
         last_error: ZoteroClientError | None = None
@@ -350,7 +350,7 @@ class ZoteroClient:
         self,
         item_key: str,
         style: str,
-        locale: str = "pl-PL",
+        locale: str = DEFAULT_LOCALE,
     ) -> str:
         resolved_style = resolve_style_id(style)
         response = self._request(
@@ -371,7 +371,7 @@ class ZoteroClient:
         self,
         item_keys: list[str],
         style: str,
-        locale: str = "pl-PL",
+        locale: str = DEFAULT_LOCALE,
     ) -> dict[str, dict[str, str]]:
         """Zbiorczo pobiera bib+citation dla wielu pozycji (jedno żądanie, mapowanie po kluczu)."""
         resolved_style = resolve_style_id(style)
@@ -401,7 +401,7 @@ class ZoteroClient:
         self,
         collection_key: str,
         style: str,
-        locale: str = "pl-PL",
+        locale: str = DEFAULT_LOCALE,
     ) -> str:
         response = self._request(
             "GET",

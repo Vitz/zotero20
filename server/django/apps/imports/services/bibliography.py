@@ -7,6 +7,14 @@ from html.parser import HTMLParser
 from .exceptions import ZoteroClientError
 
 DEFAULT_STYLE_ID = "apa"
+DEFAULT_LOCALE = "en-US"
+
+# Locale CSL przekazywany do Zotero (?locale=) — steruje „et al.” / „i in.” itd.
+CITATION_LOCALES: list[dict[str, str]] = [
+    {"id": "en-US", "label": "English (et al.)"},
+    {"id": "pl-PL", "label": "Polski (i in.)"},
+]
+_LOCALE_IDS = {item["id"].casefold(): item["id"] for item in CITATION_LOCALES}
 
 # Popularne style CSL (identyfikator = fragment URL zotero.org/styles/…)
 CSL_STYLES: list[dict[str, str]] = [
@@ -49,6 +57,27 @@ def style_label(style_id: str) -> str:
         if style["id"] == style_id:
             return style["label"]
     return style_id
+
+
+def list_locales() -> list[dict[str, str]]:
+    return [dict(item) for item in CITATION_LOCALES]
+
+
+def resolve_locale(locale: str | None) -> str:
+    normalized = (locale or "").strip().replace("_", "-")
+    if not normalized:
+        return DEFAULT_LOCALE
+    canonical = _LOCALE_IDS.get(normalized.casefold())
+    if canonical:
+        return canonical
+    raise ValueError(f"Nieobsługiwany język cytowań: {locale}")
+
+
+def locale_label(locale: str) -> str:
+    for item in CITATION_LOCALES:
+        if item["id"] == locale:
+            return item["label"]
+    return locale
 
 
 def is_numeric_style(style_id: str) -> bool:
@@ -144,18 +173,18 @@ def parse_formatted_items(raw, requested_keys: list[str]) -> dict[str, dict[str,
     return formatted
 
 
-def _fetch_item_bibliography_entry(client, item_key: str, style_id: str) -> str:
-    bib_html = client.fetch_item_bibliography(item_key, style_id)
+def _fetch_item_bibliography_entry(client, item_key: str, style_id: str, locale: str) -> str:
+    bib_html = client.fetch_item_bibliography(item_key, style_id, locale)
     parsed = [entry for entry in parse_bib_html(bib_html) if entry.strip()]
     return parsed[0] if parsed else ""
 
 
-def _fetch_item_citation_text(client, item_key: str, style_id: str) -> str:
+def _fetch_item_citation_text(client, item_key: str, style_id: str, locale: str) -> str:
     fetch = getattr(client, "fetch_item_citation", None)
     if fetch is None:
         return ""
     try:
-        return (fetch(item_key, style_id) or "").strip()
+        return (fetch(item_key, style_id, locale) or "").strip()
     except Exception:  # noqa: BLE001 — cytowanie w tekście jest opcjonalne dla bibliografii
         return ""
 
@@ -164,6 +193,7 @@ def _fetch_formatted_items(
     client,
     item_keys: list[str],
     style_id: str,
+    locale: str,
     *,
     need_citations: bool,
 ) -> tuple[dict[str, dict[str, str]], list[str]]:
@@ -177,7 +207,7 @@ def _fetch_formatted_items(
     batch = getattr(client, "fetch_items_formatted", None)
     if batch is not None:
         try:
-            raw = batch(item_keys, style_id) or {}
+            raw = batch(item_keys, style_id, locale) or {}
         except Exception:  # noqa: BLE001 — fallback na zapytania pojedyncze
             raw = {}
         for key, value in raw.items():
@@ -194,7 +224,7 @@ def _fetch_formatted_items(
         current = formatted.get(item_key)
         if current is None:
             try:
-                entry = _fetch_item_bibliography_entry(client, item_key, style_id)
+                entry = _fetch_item_bibliography_entry(client, item_key, style_id, locale)
             except ZoteroClientError:
                 entry = ""
             if not entry:
@@ -203,12 +233,18 @@ def _fetch_formatted_items(
             current = {"bib": entry, "citation": ""}
             formatted[item_key] = current
         if need_citations and not current["citation"]:
-            current["citation"] = _fetch_item_citation_text(client, item_key, style_id)
+            current["citation"] = _fetch_item_citation_text(client, item_key, style_id, locale)
 
     return formatted, missing
 
 
-def build_document_citations(client, source: str, item_keys: list[str], style_id: str) -> dict:
+def build_document_citations(
+    client,
+    source: str,
+    item_keys: list[str],
+    style_id: str,
+    locale: str | None = None,
+) -> dict:
     """Spójne cytowania w tekście i bibliografia dla pozycji cytowanych w dokumencie.
 
     Kolejność wejściowa to kolejność cytowania w dokumencie. Dla stylów numerycznych
@@ -216,6 +252,7 @@ def build_document_citations(client, source: str, item_keys: list[str], style_id
     dla stylów autor–rok bibliografia jest sortowana alfabetycznie jak w Zotero.
     """
     resolved_style = resolve_style_id(style_id)
+    resolved_locale = resolve_locale(locale)
     ordered_keys = dedupe_item_keys(item_keys)
     if not ordered_keys:
         raise ValueError("Wymagana niepusta lista item_keys.")
@@ -225,6 +262,7 @@ def build_document_citations(client, source: str, item_keys: list[str], style_id
         client,
         ordered_keys,
         resolved_style,
+        resolved_locale,
         need_citations=not numeric,
     )
     present_keys = [key for key in ordered_keys if key in formatted]
@@ -254,6 +292,7 @@ def build_document_citations(client, source: str, item_keys: list[str], style_id
         "source": source,
         "style": resolved_style,
         "style_label": style_label(resolved_style),
+        "locale": resolved_locale,
         "numeric": numeric,
         "item_count": len(entries),
         "item_keys": present_keys,
@@ -265,22 +304,37 @@ def build_document_citations(client, source: str, item_keys: list[str], style_id
     return payload
 
 
-def export_items_bibliography(client, source: str, item_keys: list[str], style_id: str) -> dict:
+def export_items_bibliography(
+    client,
+    source: str,
+    item_keys: list[str],
+    style_id: str,
+    locale: str | None = None,
+) -> dict:
     """Bibliografia wybranych pozycji (bez cytowań w tekście)."""
-    payload = build_document_citations(client, source, item_keys, style_id)
+    payload = build_document_citations(client, source, item_keys, style_id, locale)
     payload.pop("citations", None)
     return payload
 
 
-def export_collection_bibliography(client, source: str, collection_key: str, style_id: str) -> dict:
+def export_collection_bibliography(
+    client,
+    source: str,
+    collection_key: str,
+    style_id: str,
+    locale: str | None = None,
+) -> dict:
     """Pobiera sformatowaną bibliografię kolekcji przez Zotero API (format=bib)."""
     resolved_style = resolve_style_id(style_id)
+    resolved_locale = resolve_locale(locale)
     try:
         has_items = bool(client.list_collection_items(collection_key, limit=1))
     except Exception:
         has_items = False
 
-    bib_html = client.fetch_collection_bibliography(collection_key, resolved_style)
+    bib_html = client.fetch_collection_bibliography(
+        collection_key, resolved_style, resolved_locale
+    )
     entries = [entry for entry in parse_bib_html(bib_html) if entry.strip()]
 
     if not entries and has_items:
@@ -294,6 +348,7 @@ def export_collection_bibliography(client, source: str, collection_key: str, sty
         "source": source,
         "style": resolved_style,
         "style_label": style_label(resolved_style),
+        "locale": resolved_locale,
         "item_count": len(entries),
         "entries": entries,
         "html": bib_html,

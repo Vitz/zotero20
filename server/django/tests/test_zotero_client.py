@@ -10,6 +10,7 @@ from tests.helpers.zotero_mock import (
     register_doi_search_empty,
     register_doi_search_found,
     register_full_local_api,
+    register_item_citation,
     register_local_zotero_base,
 )
 
@@ -105,6 +106,19 @@ class TestZoteroClient:
         client = ZoteroClient()
         text = client.fetch_item_citation(ITEM_KEY_1, "apa")
         assert text == "(Smith, 2013)"
+        citation_urls = [
+            call.request.url for call in responses.calls if "format=citation" in call.request.url
+        ]
+        assert citation_urls
+        assert "locale=en-US" in citation_urls[0]
+
+    @responses.activate
+    def test_fetch_item_citation_sends_requested_locale(self):
+        register_item_citation(responses, ITEM_KEY_1, locale="pl-PL")
+        client = ZoteroClient()
+        text = client.fetch_item_citation(ITEM_KEY_1, "apa", "pl-PL")
+        assert text == "(Smith, 2013)"
+        assert "locale=pl-PL" in responses.calls[0].request.url
 
     @responses.activate
     def test_get_item(self):

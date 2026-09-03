@@ -250,6 +250,17 @@
       Ładowanie źródła kolekcji…
     </p>
 
+    <label for="citation-locale">Język cytowań (et al. / i in.)</label>
+    <select id="citation-locale" onchange="persistCitationLocale()">
+      <option value="en-US">English — et al.</option>
+      <option value="pl-PL">Polski — i in.</option>
+    </select>
+    <p class="hint" style="font-size:11px;color:#555;margin-top:6px;">
+      Dotyczy tekstu cytowań i bibliografii (CSL), nie języka panelu.
+      Praca po angielsku → English. Po zmianie kliknij
+      <strong>Zmień styl</strong> w zakładce Cytowania, żeby przeliczyć istniejące wpisy.
+    </p>
+
     <details style="margin-top:12px;">
       <summary>Tryb diagnostyczny (debug)</summary>
       <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin-top:8px;">
@@ -347,6 +358,7 @@
     <p class="hint" style="font-size:11px;color:#555;margin-top:6px;">
       Jeden przycisk przelicza <strong>wszystkie</strong> cytowania w tekście i bibliografię tym samym stylem.
       W stylach numerycznych (IEEE, Vancouver) numery [1], [2] są nadawane wg kolejności cytowania.
+      Język cytowań (et al. / i in.) ustawiasz w zakładce Ustawienia — po zmianie kliknij ten przycisk.
     </p>
 
     <label for="insert-mode">Gdzie wstawiać cytowanie</label>
@@ -439,7 +451,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.1.2';
+    var SIDEBAR_VERSION = '2.1.3';
 
     // UrlFetchApp ma limity dzienne — 3 s to kompromis vs prośba o 1 s.
     // Przy długim otwarciu sidebara rozważ później 5 s w ustawieniach.
@@ -463,6 +475,7 @@
       bibliographyStyle: 'apa',
       wholeCollection: false,
       insertMode: 'cursor',
+      citationLocale: 'en-US',
       debugMode: false,
       citationSummary: { citation_count: 0, item_count: 0, has_bibliography: false },
     };
@@ -1384,6 +1397,15 @@
         })
         .withFailureHandler(function () {})
         .getCitationInsertMode();
+
+      google.script.run
+        .withSuccessHandler(function (locale) {
+          appState.citationLocale = locale || 'en-US';
+          var sel = document.getElementById('citation-locale');
+          if (sel) sel.value = appState.citationLocale;
+        })
+        .withFailureHandler(function () {})
+        .getCitationLocale();
     }
 
     function persistWholeCollection() {
@@ -1400,6 +1422,24 @@
       google.script.run
         .withFailureHandler(function () {})
         .saveCitationInsertMode(appState.insertMode);
+    }
+
+    function persistCitationLocale() {
+      var sel = document.getElementById('citation-locale');
+      var locale = sel && sel.value === 'pl-PL' ? 'pl-PL' : 'en-US';
+      appState.citationLocale = locale;
+      google.script.run
+        .withSuccessHandler(function (saved) {
+          appState.citationLocale = saved || locale;
+          setStatus(
+            'Zapisano język cytowań. Żeby przeliczyć istniejące cytowania, kliknij „Zmień styl” w zakładce Cytowania.',
+            false
+          );
+        })
+        .withFailureHandler(function (e) {
+          setStatus(formatScriptError(e), true);
+        })
+        .saveCitationLocale(locale);
     }
 
     function isWholeCollectionMode() {
@@ -1438,6 +1478,11 @@
             appState.insertMode = summary.insert_mode;
             var modeSel = document.getElementById('insert-mode');
             if (modeSel) modeSel.value = summary.insert_mode;
+          }
+          if (summary && summary.locale) {
+            appState.citationLocale = summary.locale;
+            var localeSel = document.getElementById('citation-locale');
+            if (localeSel) localeSel.value = summary.locale;
           }
         })
         .withFailureHandler(function () {

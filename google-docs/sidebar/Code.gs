@@ -5,12 +5,13 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.1.2';
+const ADDON_VERSION = '2.1.3';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
 const PROP_BIBLIOGRAPHY_CITED_ONLY = 'ZOTERO20_BIBLIOGRAPHY_CITED_ONLY';
 const PROP_CITATION_INSERT_MODE = 'ZOTERO20_CITATION_INSERT_MODE';
+const PROP_CITATION_LOCALE = 'ZOTERO20_CITATION_LOCALE';
 const PROP_DEBUG = 'ZOTERO20_DEBUG';
 const NAMED_RANGE_BIBLIOGRAPHY = 'ZOTERO20_BIBLIOGRAPHY';
 const BIBLIOGRAPHY_HEADING = 'Bibliografia';
@@ -293,6 +294,35 @@ function saveBibliographyStyle(styleId) {
   return getBibliographyStyle();
 }
 
+var DEFAULT_CITATION_LOCALE = 'en-US';
+
+function normalizeCitationLocale_(value) {
+  var lower = String(value || '').trim().replace('_', '-').toLowerCase();
+  if (lower === 'en-us') {
+    return 'en-US';
+  }
+  if (lower === 'pl-pl') {
+    return 'pl-PL';
+  }
+  return '';
+}
+
+/** Język CSL cytowań i bibliografii (et al. / i in.) — per dokument, niezależny od języka panelu. */
+function getCitationLocale() {
+  var saved = PropertiesService.getDocumentProperties().getProperty(PROP_CITATION_LOCALE);
+  var resolved = normalizeCitationLocale_(saved);
+  return resolved || DEFAULT_CITATION_LOCALE;
+}
+
+function saveCitationLocale(locale) {
+  var resolved = normalizeCitationLocale_(locale);
+  if (!resolved) {
+    throw new Error('Wybierz język cytowań: English albo Polski.');
+  }
+  PropertiesService.getDocumentProperties().setProperty(PROP_CITATION_LOCALE, resolved);
+  return getCitationLocale();
+}
+
 function getCitationInsertMode() {
   var mode = PropertiesService.getDocumentProperties().getProperty(PROP_CITATION_INSERT_MODE);
   return mode === 'placeholder' ? 'placeholder' : 'cursor';
@@ -418,6 +448,7 @@ function getDocumentCitationSummary() {
   var keys = uniqueItemKeys_(citations);
   return {
     style: getBibliographyStyle(),
+    locale: getCitationLocale(),
     insert_mode: getCitationInsertMode(),
     citation_count: citations.length,
     item_count: keys.length,
@@ -475,7 +506,11 @@ function upsertBibliography_(isRefresh, citedOnly) {
     throw new Error('Tryb „cała kolekcja” wymaga kolekcji tego dokumentu — ustaw ją w zakładce Ustawienia.');
   }
 
-  var data = apiPost('/bibliography', { style: style, collection_key: collection.key });
+  var data = apiPost('/bibliography', {
+    style: style,
+    collection_key: collection.key,
+    locale: getCitationLocale(),
+  });
   var entries = normalizeEntries_(data.entries);
   if (!entries.length) {
     throw new Error(
@@ -504,7 +539,11 @@ function normalizeEntries_(entries) {
 /** Jedno żądanie zwraca i cytowania w tekście, i wpisy bibliografii dla tego samego stylu. */
 function fetchDocumentCitations_(citations, style) {
   var keys = uniqueItemKeys_(citations);
-  var data = apiPost('/citations', { style: style, item_keys: keys });
+  var data = apiPost('/citations', {
+    style: style,
+    item_keys: keys,
+    locale: getCitationLocale(),
+  });
   var byKey = {};
   var titleByKey = {};
   var list = data.citations || [];
@@ -756,8 +795,16 @@ function getItemCitationText(itemKey, style) {
     throw new Error('Brak klucza pozycji.');
   }
   var path = '/items/' + encodeURIComponent(key);
+  var params = [];
   if (style) {
-    path += '?style=' + encodeURIComponent(style);
+    params.push('style=' + encodeURIComponent(style));
+  }
+  var locale = getCitationLocale();
+  if (locale) {
+    params.push('locale=' + encodeURIComponent(locale));
+  }
+  if (params.length) {
+    path += '?' + params.join('&');
   }
   var data = apiGet(path);
   if (data.citation_text) {

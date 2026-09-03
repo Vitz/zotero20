@@ -47,6 +47,19 @@ jobs:
           echo "port=$port" >> "$GITHUB_OUTPUT"
           echo "SSH → ${host}:${port} (HTTP zotero: :8089 via tunel)"
 
+      # Stack files (compose, scripts) come from the Actions checkout — no git on VPS.
+      # Deploy only pulls application code from GHCR images.
+      - name: Sync stack files to RPi
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ steps.ssh.outputs.host }}
+          port: ${{ steps.ssh.outputs.port }}
+          username: ${{ vars.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: "stack"
+          target: "${{ vars.DEPLOY_PATH }}"
+          overwrite: true
+
       - name: Deploy stack on RPi (pull images only)
         uses: appleboy/ssh-action@v1.2.0
         env:
@@ -62,20 +75,14 @@ jobs:
           script: |
             set -euo pipefail
             DEPLOY_ROOT="${{ vars.DEPLOY_PATH }}"
-            mkdir -p "${DEPLOY_ROOT}"
-            if [ ! -d "${DEPLOY_ROOT}/.git" ]; then
-              git clone https://github.com/${{ github.repository }}.git "${DEPLOY_ROOT}"
-            fi
-            cd "${DEPLOY_ROOT}"
-            git fetch origin main
-            git reset --hard origin/main
-            chmod +x stack/scripts/*.sh
+            mkdir -p "${DEPLOY_ROOT}/stack"
+            cd "${DEPLOY_ROOT}/stack"
+            chmod +x scripts/*.sh
             export ZOTERO20_IMAGE_ZOTERO="${IMAGE_ZOTERO}"
             export ZOTERO20_IMAGE_DJANGO="${IMAGE_DJANGO}"
             export GHCR_PULL_TOKEN="${{ secrets.GHCR_PULL_TOKEN }}"
             export GHCR_PULL_USER="${{ vars.GHCR_OWNER || 'vitz' }}"
             export CLOUDFLARED_TUNNEL_TOKEN="${{ secrets.CLOUDFLARED_TUNNEL_TOKEN }}"
-            cd stack
             if [ ! -f .env ]; then
               cp .env.example .env
             fi

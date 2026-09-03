@@ -5,12 +5,13 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.0.0';
+const ADDON_VERSION = '2.0.1';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
 const PROP_BIBLIOGRAPHY_CITED_ONLY = 'ZOTERO20_BIBLIOGRAPHY_CITED_ONLY';
 const PROP_CITATION_INSERT_MODE = 'ZOTERO20_CITATION_INSERT_MODE';
+const PROP_DEBUG = 'ZOTERO20_DEBUG';
 const NAMED_RANGE_BIBLIOGRAPHY = 'ZOTERO20_BIBLIOGRAPHY';
 const BIBLIOGRAPHY_HEADING = 'Bibliografia';
 
@@ -174,6 +175,15 @@ function saveCitationInsertMode(mode) {
   return getCitationInsertMode();
 }
 
+function getDebugMode() {
+  return PropertiesService.getScriptProperties().getProperty(PROP_DEBUG) === 'true';
+}
+
+function saveDebugMode(enabled) {
+  PropertiesService.getScriptProperties().setProperty(PROP_DEBUG, enabled ? 'true' : 'false');
+  return getDebugMode();
+}
+
 function getBibliographyCitedOnly() {
   var val = PropertiesService.getDocumentProperties().getProperty(PROP_BIBLIOGRAPHY_CITED_ONLY);
   if (val === null || val === undefined || val === '') {
@@ -231,13 +241,17 @@ function applyCitationStyle(styleId, options) {
       bibliography = writeBibliographyToDocument_(data.entries, data.style_label, mustExist);
     } catch (e) {
       bibliographyError = e.message || String(e);
+      if (getDebugMode()) {
+        bibliographyError += '\n[debug] ' + (e.stack || '');
+      }
     }
   }
 
-  return {
+  var result = {
     style: data.style,
     style_label: data.style_label,
     numeric: !!data.numeric,
+    document_citation_count: citations.length,
     cited_count: data.item_keys.length,
     updated: updated.updated,
     unchanged: updated.unchanged,
@@ -246,6 +260,14 @@ function applyCitationStyle(styleId, options) {
     bibliography: bibliography,
     bibliography_error: bibliographyError,
   };
+  if (getDebugMode()) {
+    result.debug = {
+      item_keys: data.item_keys,
+      citation_by_key: data.citation_by_key,
+      rewrite: updated,
+    };
+  }
+  return result;
 }
 
 /** Zgodność wstecz z poprzednią wersją sidebara. */
@@ -356,8 +378,9 @@ function fetchDocumentCitations_(citations, style) {
   var list = data.citations || [];
   for (var i = 0; i < list.length; i++) {
     var text = String(list[i].citation_text || '').trim();
-    if (list[i].item_key && text) {
-      byKey[list[i].item_key] = text;
+    var key = normalizeItemKey_(list[i].item_key);
+    if (key && text) {
+      byKey[key] = text;
     }
   }
   return {
@@ -366,7 +389,7 @@ function fetchDocumentCitations_(citations, style) {
     style: data.style || style,
     style_label: data.style_label || style,
     numeric: !!data.numeric,
-    item_keys: data.item_keys || keys,
+    item_keys: (data.item_keys || keys).map(normalizeItemKey_),
     missing_item_keys: data.missing_item_keys || [],
   };
 }
@@ -379,10 +402,22 @@ function fetchDocumentCitations_(citations, style) {
 function writeBibliographyToDocument_(entries, styleLabel, mustExist) {
   var doc = DocumentApp.getActiveDocument();
   var body = doc.getBody();
-  var hadExisting = removeBibliographySection_(doc, body);
+  var section = locateBibliographySection_(doc, body);
 
-  if (mustExist && !hadExisting) {
+  if (mustExist && !section) {
     throw new Error('Brak bibliografii w dokumencie — użyj „Wstaw bibliografię”.');
+  }
+
+  if (section) {
+    removeBibliographyNamedRanges_(doc);
+    var startIdx = updateBibliographyInPlace_(body, section.startIdx, section.endIdx, entries);
+    attachBibliographyNamedRange_(doc, body, startIdx, entries.length);
+    return {
+      inserted: false,
+      refreshed: true,
+      item_count: entries.length,
+      style_label: styleLabel,
+    };
   }
 
   body.appendParagraph(BIBLIOGRAPHY_HEADING).setHeading(DocumentApp.ParagraphHeading.HEADING1);
@@ -392,8 +427,20 @@ function writeBibliographyToDocument_(entries, styleLabel, mustExist) {
     body.appendParagraph(String(entries[i]));
   }
 
+  attachBibliographyNamedRange_(doc, body, startIdx, entries.length);
+
+  return {
+    inserted: true,
+    refreshed: false,
+    item_count: entries.length,
+    style_label: styleLabel,
+  };
+}
+
+function attachBibliographyNamedRange_(doc, body, startIdx, entryCount) {
   var rangeBuilder = doc.newRange();
-  for (var j = startIdx; j < body.getNumChildren(); j++) {
+  var endIdx = startIdx + entryCount;
+  for (var j = startIdx; j <= endIdx && j < body.getNumChildren(); j++) {
     var child = body.getChild(j);
     if (child.getType() !== DocumentApp.ElementType.PARAGRAPH) {
       continue;
@@ -402,26 +449,110 @@ function writeBibliographyToDocument_(entries, styleLabel, mustExist) {
     if (!paragraph.getText()) {
       continue;
     }
-    // NamedRange: Paragraph bez offsetów (offsety tylko dla Text).
     rangeBuilder.addElement(paragraph);
   }
-
   doc.addNamedRange(NAMED_RANGE_BIBLIOGRAPHY, rangeBuilder.build());
+}
 
-  return {
-    inserted: !hadExisting,
-    refreshed: hadExisting,
-    item_count: entries.length,
-    style_label: styleLabel,
-  };
+function removeBibliographyNamedRanges_(doc) {
+  var named = doc.getNamedRanges(NAMED_RANGE_BIBLIOGRAPHY);
+  for (var n = 0; n < named.length; n++) {
+    named[n].remove();
+  }
+}
+
+function locateBibliographySection_(doc, body) {
+  var named = doc.getNamedRanges(NAMED_RANGE_BIBLIOGRAPHY);
+  if (named && named.length) {
+    var indices = collectBodyChildIndicesFromNamed_(named);
+    if (indices.length) {
+      indices.sort(function (a, b) { return a - b; });
+      return { startIdx: indices[0], endIdx: indices[indices.length - 1] };
+    }
+  }
+
+  var headingIdx = findBibliographyHeadingIndex_(body);
+  if (headingIdx < 0) {
+    return null;
+  }
+  var endIdx = headingIdx;
+  for (var k = headingIdx + 1; k < body.getNumChildren(); k++) {
+    var next = body.getChild(k);
+    if (
+      next.getType() === DocumentApp.ElementType.PARAGRAPH &&
+      next.asParagraph().getHeading() === DocumentApp.ParagraphHeading.HEADING1
+    ) {
+      break;
+    }
+    endIdx = k;
+  }
+  return { startIdx: headingIdx, endIdx: endIdx };
+}
+
+function collectBodyChildIndicesFromNamed_(namedRanges) {
+  var seen = {};
+  for (var n = 0; n < namedRanges.length; n++) {
+    var elements = namedRanges[n].getRange().getRangeElements();
+    for (var i = 0; i < elements.length; i++) {
+      var element = elements[i].getElement();
+      if (!element || !element.getParent) {
+        continue;
+      }
+      var parent = element.getParent();
+      if (parent && parent.getType && parent.getType() === DocumentApp.ElementType.BODY) {
+        var idx = parent.getChildIndex(element);
+        if (idx >= 0) {
+          seen[idx] = true;
+        }
+      }
+    }
+  }
+  return Object.keys(seen).map(function (k) { return parseInt(k, 10); });
+}
+
+/**
+ * Aktualizuje sekcję bibliografii w miejscu — bez kasowania całego dokumentu
+ * (unika błędu „Nie można usunąć ostatniego rozdziału…”).
+ */
+function updateBibliographyInPlace_(body, startIdx, endIdx, entries) {
+  var heading = body.getChild(startIdx).asParagraph();
+  heading.setText(BIBLIOGRAPHY_HEADING);
+  heading.setHeading(DocumentApp.ParagraphHeading.HEADING1);
+
+  var i;
+  for (i = 0; i < entries.length; i++) {
+    var targetIdx = startIdx + 1 + i;
+    if (targetIdx <= endIdx && targetIdx < body.getNumChildren()) {
+      var paragraph = body.getChild(targetIdx).asParagraph();
+      paragraph.setHeading(DocumentApp.ParagraphHeading.NORMAL);
+      paragraph.setText(String(entries[i]));
+    } else {
+      body.insertParagraph(targetIdx, String(entries[i]));
+      endIdx++;
+    }
+  }
+
+  var excessStart = startIdx + 1 + entries.length;
+  for (var j = endIdx; j >= excessStart; j--) {
+    if (j < 0 || j >= body.getNumChildren()) {
+      continue;
+    }
+    var child = body.getChild(j);
+    if (body.getNumChildren() <= 1) {
+      if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
+        child.asParagraph().clear();
+      }
+      continue;
+    }
+    child.removeFromParent();
+  }
+
+  return startIdx;
 }
 
 function hasBibliographySection_() {
   var doc = DocumentApp.getActiveDocument();
-  if (doc.getNamedRanges(NAMED_RANGE_BIBLIOGRAPHY).length) {
-    return true;
-  }
-  return findBibliographyHeadingIndex_(doc.getBody()) >= 0;
+  return locateBibliographySection_(doc, doc.getBody()) !== null;
 }
 
 function findBibliographyHeadingIndex_(body) {
@@ -443,49 +574,16 @@ function findBibliographyHeadingIndex_(body) {
 }
 
 function removeBibliographySection_(doc, body) {
-  var named = doc.getNamedRanges(NAMED_RANGE_BIBLIOGRAPHY);
-  var indices = [];
-
-  if (named && named.length) {
-    var seen = {};
-    for (var n = 0; n < named.length; n++) {
-      var elements = named[n].getRange().getRangeElements();
-      for (var i = 0; i < elements.length; i++) {
-        var element = elements[i].getElement();
-        if (!element || !element.getParent) {
-          continue;
-        }
-        var parent = element.getParent();
-        if (parent && parent.getType && parent.getType() === DocumentApp.ElementType.BODY) {
-          var idx = parent.getChildIndex(element);
-          if (idx >= 0) {
-            seen[idx] = true;
-          }
-        }
-      }
-      named[n].remove();
-    }
-    indices = Object.keys(seen).map(function (k) { return parseInt(k, 10); });
+  var section = locateBibliographySection_(doc, body);
+  if (!section) {
+    return false;
   }
 
-  if (!indices.length) {
-    // Awaryjnie (NamedRange zgubiony przy edycji): sekcja to nagłówek „Bibliografia”
-    // i akapity do następnego nagłówka H1 lub do końca dokumentu.
-    var headingIdx = findBibliographyHeadingIndex_(body);
-    if (headingIdx < 0) {
-      return false;
-    }
-    indices.push(headingIdx);
-    for (var k = headingIdx + 1; k < body.getNumChildren(); k++) {
-      var next = body.getChild(k);
-      if (
-        next.getType() === DocumentApp.ElementType.PARAGRAPH &&
-        next.asParagraph().getHeading() === DocumentApp.ParagraphHeading.HEADING1
-      ) {
-        break;
-      }
-      indices.push(k);
-    }
+  removeBibliographyNamedRanges_(doc);
+
+  var indices = [];
+  for (var k = section.startIdx; k <= section.endIdx; k++) {
+    indices.push(k);
   }
 
   indices.sort(function (a, b) { return b - a; });
@@ -493,14 +591,17 @@ function removeBibliographySection_(doc, body) {
     if (indices[j] >= body.getNumChildren()) {
       continue;
     }
-    // Dokument musi mieć co najmniej jeden akapit — inaczej Docs rzuca wyjątkiem.
     if (body.getNumChildren() <= 1) {
-      body.appendParagraph('');
+      var only = body.getChild(indices[j]);
+      if (only.getType() === DocumentApp.ElementType.PARAGRAPH) {
+        only.asParagraph().clear();
+      }
+      continue;
     }
     body.getChild(indices[j]).removeFromParent();
   }
 
-  return indices.length > 0;
+  return true;
 }
 
 function getItemCitationText(itemKey, style) {
@@ -528,9 +629,17 @@ function getItemCitationText(itemKey, style) {
  * i bibliografia pozostały spójne — tak jak robi to wtyczka Zotero.
  */
 function insertCitationForItem(itemKey, identifiers, mode) {
-  var key = String(itemKey || '').trim();
+  var key = normalizeItemKey_(itemKey);
   if (!key) {
     throw new Error('Brak klucza pozycji — zaimportuj DOI ponownie lub wybierz pozycję z listy.');
+  }
+
+  var citedKeys = uniqueItemKeys_(getTrackedCitations_());
+  if (citedKeys.indexOf(key) >= 0) {
+    throw new Error(
+      'Ta pozycja jest już cytowana w dokumencie (klucz ' + key + '). ' +
+      'Usuń istniejące cytowanie, jeśli chcesz wstawić je ponownie.'
+    );
   }
 
   var style = getBibliographyStyle();
@@ -639,35 +748,51 @@ function newCitationId_() {
 function buildCitationUrl_(itemKey, citationId) {
   return (
     CITE_LINK_BASE +
-    encodeURIComponent(String(itemKey).trim()) +
+    encodeURIComponent(normalizeItemKey_(itemKey)) +
     '?c=' +
     encodeURIComponent(citationId || newCitationId_())
   );
 }
 
+function normalizeItemKey_(itemKey) {
+  return String(itemKey || '').trim().toUpperCase();
+}
+
 function parseCitationUrl_(url) {
-  if (!url || String(url).indexOf(CITE_LINK_BASE) !== 0) {
+  if (!url) {
     return null;
   }
-  var rest = String(url).substring(CITE_LINK_BASE.length);
-  var parts = rest.split('?');
+  var match = /^(?:https?:\/\/)?(?:www\.)?zotero\.keyweb\.pl\/cite\/([^?#\s]+)/i.exec(String(url));
+  if (!match) {
+    return null;
+  }
   var itemKey = '';
   try {
-    itemKey = decodeURIComponent(parts[0] || '').trim();
+    itemKey = normalizeItemKey_(decodeURIComponent(match[1]));
   } catch (e) {
-    itemKey = (parts[0] || '').trim();
+    itemKey = normalizeItemKey_(match[1]);
   }
   if (!itemKey) {
     return null;
   }
   var citationId = '';
-  if (parts[1]) {
-    var match = /(?:^|&)c=([^&]*)/.exec(parts[1]);
-    if (match) {
-      citationId = match[1];
-    }
+  var queryMatch = /[?&]c=([^&#]*)/i.exec(String(url));
+  if (queryMatch) {
+    citationId = queryMatch[1];
   }
   return { itemKey: itemKey, citationId: citationId };
+}
+
+function linkUrlAtOffset_(textElement, start, end) {
+  var url = textElement.getLinkUrl(start) || '';
+  if (!url && end > start) {
+    url = textElement.getLinkUrl(end) || '';
+  }
+  if (!url) {
+    var mid = Math.floor((start + end) / 2);
+    url = textElement.getLinkUrl(mid) || '';
+  }
+  return url;
 }
 
 /**
@@ -687,7 +812,12 @@ function applyCitationLink_(textElement, start, end, itemKey, citationId) {
 function getTrackedCitations_() {
   migrateLegacyNamedRanges_();
   var runs = [];
-  collectCitationRuns_(DocumentApp.getActiveDocument().getBody(), runs);
+  var doc = DocumentApp.getActiveDocument();
+  collectCitationRuns_(doc.getBody(), runs);
+  var footnotes = doc.getFootnotes();
+  for (var f = 0; f < footnotes.length; f++) {
+    collectCitationRuns_(footnotes[f].getFootnoteContents(), runs);
+  }
   return runs;
 }
 
@@ -730,8 +860,11 @@ function collectRunsFromText_(textElement, runs) {
     if (end < start) {
       continue;
     }
+    if (end >= text.length) {
+      end = text.length - 1;
+    }
 
-    var url = textElement.getLinkUrl(start) || '';
+    var url = linkUrlAtOffset_(textElement, start, end);
     var meta = parseCitationUrl_(url);
     if (!meta) {
       current = null;
@@ -760,7 +893,7 @@ function uniqueItemKeys_(runs) {
   var seen = {};
   var keys = [];
   for (var i = 0; i < runs.length; i++) {
-    var key = runs[i].item_key;
+    var key = normalizeItemKey_(runs[i].item_key);
     if (!key || seen[key]) {
       continue;
     }
@@ -768,6 +901,12 @@ function uniqueItemKeys_(runs) {
     keys.push(key);
   }
   return keys;
+}
+
+function citationRunText_(textElement, start, end) {
+  var text = textElement.getText();
+  var slice = text.substring(start, end + 1);
+  return slice.replace(/\n+$/g, '').trim();
 }
 
 /**
@@ -778,16 +917,21 @@ function rewriteCitationRuns_(runs, citationByKey) {
   var updated = 0;
   var unchanged = 0;
   var skipped = 0;
+  var normalizedMap = {};
+  Object.keys(citationByKey || {}).forEach(function (k) {
+    normalizedMap[normalizeItemKey_(k)] = citationByKey[k];
+  });
 
   for (var i = runs.length - 1; i >= 0; i--) {
     var run = runs[i];
-    var newText = citationByKey[run.item_key];
+    var itemKey = normalizeItemKey_(run.item_key);
+    var newText = normalizedMap[itemKey];
     if (!newText) {
       skipped++;
       continue;
     }
 
-    var currentText = run.textElement.getText().substring(run.start, run.end + 1);
+    var currentText = citationRunText_(run.textElement, run.start, run.end);
     if (currentText === newText) {
       unchanged++;
       continue;
@@ -796,7 +940,7 @@ function rewriteCitationRuns_(runs, citationByKey) {
     run.textElement.deleteText(run.start, run.end);
     run.textElement.insertText(run.start, newText);
     run.end = run.start + newText.length - 1;
-    applyCitationLink_(run.textElement, run.start, run.end, run.item_key, run.citation_id);
+    applyCitationLink_(run.textElement, run.start, run.end, itemKey, run.citation_id);
     updated++;
   }
 
@@ -1023,6 +1167,9 @@ function extractItemKey_(result) {
 }
 
 function apiGet(path) {
+  if (getDebugMode() && path.indexOf('debug=') < 0) {
+    path += (path.indexOf('?') >= 0 ? '&' : '?') + 'debug=1';
+  }
   const response = UrlFetchApp.fetch(API_BASE + path, {
     method: 'get',
     muteHttpExceptions: true,
@@ -1032,6 +1179,9 @@ function apiGet(path) {
 }
 
 function apiPost(path, payload) {
+  if (getDebugMode() && path.indexOf('debug=') < 0) {
+    path += (path.indexOf('?') >= 0 ? '&' : '?') + 'debug=1';
+  }
   const response = UrlFetchApp.fetch(API_BASE + path, {
     method: 'post',
     contentType: 'application/json',
@@ -1068,7 +1218,19 @@ function parseResponse_(response) {
     body = { raw: text };
   }
   if (code >= 400) {
-    throw new Error(body.error || body.raw || ('HTTP ' + code));
+    var detail = body.error || body.detail;
+    if (!detail && body.raw) {
+      detail = String(body.raw).substring(0, 300);
+    }
+    var message = detail || ('HTTP ' + code);
+    if (getDebugMode()) {
+      message +=
+        '\n[debug] HTTP ' +
+        code +
+        '\n' +
+        String(text).substring(0, 1200);
+    }
+    throw new Error(message);
   }
   return body;
 }

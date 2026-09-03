@@ -147,6 +147,18 @@
       Ładowanie źródła kolekcji…
     </p>
 
+    <details style="margin-top:12px;">
+      <summary>Tryb diagnostyczny (debug)</summary>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin-top:8px;">
+        <input id="debug-mode" type="checkbox" onchange="persistDebugMode()">
+        Pełne błędy API i odpowiedzi w panelu statusu
+      </label>
+      <p class="hint" style="font-size:11px;color:#555;margin-top:6px;">
+        Włącza szczegółowe komunikaty błędów i fragmenty odpowiedzi serwera (parametr <code>?debug=1</code>).
+        Przydatne przy problemach ze stylami lub cytowaniami.
+      </p>
+    </details>
+
     <div id="manual-collection-block">
       <p id="manual-collection-intro">
         <strong>Lista pusta?</strong> Wpisz klucz kolekcji ręcznie albo sprawdź konfigurację serwera.
@@ -277,12 +289,13 @@
 
   <div id="study-overview" style="display:none;">
     <h3>Pozycje w kolekcji</h3>
+    <p id="study-doi-dedup-note" class="hint" style="font-size:11px;color:#555;display:none;"></p>
     <div id="study-overview-list"></div>
   </div>
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.0.0';
+    var SIDEBAR_VERSION = '2.0.1';
 
     var lastImport = { doi: '', orcid: '', itemKey: '', citationText: '', identifiers: null };
     var duplicateItem = null;
@@ -296,6 +309,7 @@
       bibliographyStyle: 'apa',
       wholeCollection: false,
       insertMode: 'cursor',
+      debugMode: false,
       citationSummary: { citation_count: 0, item_count: 0, has_bibliography: false },
     };
 
@@ -364,11 +378,35 @@
       if (!err) return 'Nieznany błąd.';
       if (typeof err === 'string') return err;
       if (err.message) return String(err.message);
+      if (err.stack && appState.debugMode) return String(err.stack);
       try {
         return JSON.stringify(err);
       } catch (ignore) {
         return String(err);
       }
+    }
+
+    function persistDebugMode() {
+      var cb = document.getElementById('debug-mode');
+      appState.debugMode = cb ? !!cb.checked : false;
+      google.script.run
+        .withSuccessHandler(function (enabled) {
+          appState.debugMode = !!enabled;
+          if (cb) cb.checked = appState.debugMode;
+        })
+        .withFailureHandler(function () {})
+        .saveDebugMode(appState.debugMode);
+    }
+
+    function loadDebugMode() {
+      google.script.run
+        .withSuccessHandler(function (enabled) {
+          appState.debugMode = !!enabled;
+          var cb = document.getElementById('debug-mode');
+          if (cb) cb.checked = appState.debugMode;
+        })
+        .withFailureHandler(function () {})
+        .getDebugMode();
     }
 
     function setPasteButtonsDisabled(disabled) {
@@ -492,13 +530,29 @@
       return title.substring(0, max) + '…';
     }
 
-    function renderStudyOverview(items) {
+    function renderStudyOverview(items, meta) {
+      meta = meta || {};
       var box = document.getElementById('study-overview');
       var list = document.getElementById('study-overview-list');
+      var dedupNote = document.getElementById('study-doi-dedup-note');
       if (!items || !items.length) {
         box.style.display = 'none';
         list.innerHTML = '';
+        if (dedupNote) dedupNote.style.display = 'none';
         return;
+      }
+      if (dedupNote) {
+        if (meta.hidden_duplicate_dois) {
+          dedupNote.style.display = 'block';
+          dedupNote.innerHTML =
+            'Ukryto ' + meta.hidden_duplicate_dois + ' duplikat(ów) DOI. ' +
+            (meta.doi_dedup_note ||
+              'Zotero nie blokuje duplikatów DOI w kolekcji — panel pokazuje jedną pozycję na DOI.');
+        } else {
+          dedupNote.style.display = 'block';
+          dedupNote.textContent =
+            'Zotero nie blokuje natywnie duplikatów DOI w kolekcji — ten panel ukrywa powtórki na liście.';
+        }
       }
       list.innerHTML = '';
       items.forEach(function (item) {
@@ -538,6 +592,10 @@
       google.script.run
         .withSuccessHandler(function (data) {
           var items = (data && data.items) || [];
+          var meta = {
+            hidden_duplicate_dois: data && data.hidden_duplicate_dois,
+            doi_dedup_note: data && data.doi_dedup_note,
+          };
           if (!items.length) {
             google.script.run
               .withSuccessHandler(function (sessionItems) {
@@ -549,7 +607,7 @@
               .getSessionItems();
             return;
           }
-          renderStudyOverview(items);
+          renderStudyOverview(items, meta);
         })
         .withFailureHandler(function () {
           google.script.run
@@ -832,7 +890,16 @@
           }
           var msg =
             'Styl: ' + (r.style_label || r.style) + '. Cytowań przeliczonych: ' + (r.updated || 0) +
-            ' z ' + (r.cited_count || 0) + '.';
+            ' z ' + (r.document_citation_count || r.cited_count || 0) + '.';
+          if (r.unchanged) {
+            msg += ' Bez zmian: ' + r.unchanged + '.';
+          }
+          if (r.skipped) {
+            msg += ' Pominięte (brak tekstu ze serwera): ' + r.skipped + '.';
+          }
+          if (appState.debugMode && r.debug) {
+            msg += '\n[debug] ' + JSON.stringify(r.debug).substring(0, 800);
+          }
           if (r.bibliography) {
             msg += ' Bibliografia: ' + (r.bibliography.item_count || 0) + ' pozycji.';
           } else if (r.bibliography_error) {
@@ -1167,6 +1234,7 @@
       loadDocumentPreferences();
       loadCitationSummary();
       loadStudyOverview();
+      loadDebugMode();
       setStatus('Wybierz domyślną kolekcję w Ustawieniach (jednorazowo).');
     }
 

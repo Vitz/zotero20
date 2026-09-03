@@ -143,23 +143,40 @@ class ZoteroClient:
         locale: str = "pl-PL",
     ) -> str:
         resolved_style = resolve_style_id(style)
+        last_error: ZoteroClientError | None = None
         response = self._request(
             "GET",
             f"/api/users/0/items/{item_key}",
             params={"format": "citation", "style": resolved_style, "locale": locale},
             headers={"Accept": "text/html"},
         )
-        if response.status_code != 200:
-            raise ZoteroClientError(
+        if response.status_code == 200:
+            text = parse_citation_html(response.text)
+            if text:
+                return text
+        else:
+            last_error = ZoteroClientError(
                 f"citation export failed: HTTP {response.status_code} — {response.text[:500]}",
                 response.status_code,
             )
-        text = parse_citation_html(response.text)
-        if text:
-            return text
+
+        try:
+            formatted = self.fetch_items_formatted([item_key], resolved_style, locale)
+            citation = (formatted.get(item_key) or {}).get("citation", "").strip()
+            if citation:
+                return citation
+        except ZoteroClientError as exc:
+            if last_error is None:
+                last_error = exc
+
         item = self.get_item(item_key)
         if item:
-            return item.get("citation_text") or format_citation_text(item)
+            text = (item.get("citation_text") or format_citation_text(item)).strip()
+            if text and text != "(?)":
+                return text
+
+        if last_error:
+            raise last_error
         return "(?)"
 
     def add_item_by_id(self, identifier: str, collection_key: str) -> dict:

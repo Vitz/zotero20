@@ -13,4 +13,9 @@ urlpatterns = [
     path("bibliography", views.bibliography_generate, name="bibliography"),
     path("citations", views.citations_generate, name="citations"),
     path("items/<str:item_key>", views.item_detail, name="item-detail"),
+    path("debug/health", views.debug_health, name="debug-health"),
+    path("debug/item/<str:item_key>", views.debug_item, name="debug-item"),
+    path("debug/citations", views.debug_citations, name="debug-citations"),
+    path("debug/styles", views.debug_styles, name="debug-styles"),
+    path("debug/echo", views.debug_echo, name="debug-echo"),
 ]

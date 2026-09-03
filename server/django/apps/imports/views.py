@@ -15,6 +15,11 @@ from .services.bibliography import (
 from .services.orcid import import_orcid_works
 from .services.studies import StudiesConfigError, list_studies, resolve_collection_key
 from .services.exceptions import ZoteroClientError
+from .services.debug_trace import (
+    build_document_citations_debug,
+    dedupe_collection_items_by_doi,
+    trace_item_citation,
+)
 from .services.zotero import ZoteroClient, get_zotero_client
 from .services.zotero_web import web_api_configured
 
@@ -53,8 +58,7 @@ def _zotero_collections_payload() -> dict:
         }
 
 
-@json_api
-def health(request):
+def _health_payload(verbose: bool = False) -> tuple[dict, bool]:
     if web_api_configured():
         from .services.zotero_web import ZoteroWebClient
 
@@ -65,16 +69,27 @@ def health(request):
         client = ZoteroClient()
         zotero = client.health_summary()
         ok = "ping" in zotero and zotero["ping"] is not None
-    return JsonResponse(
-        {
-            "status": "ok" if ok else "degraded",
-            "service": "zotero20-api",
-            # Tag obrazu — bez tego nie da się odróżnić „wdrożone” od „wdrożone, ale stare”.
-            "build": os.environ.get("ZOTERO20_BUILD", "unknown"),
-            "zotero": zotero,
-        },
-        status=200 if ok else 503,
-    )
+
+    payload = {
+        "status": "ok" if ok else "degraded",
+        "service": "zotero20-api",
+        # Tag obrazu — bez tego nie da się odróżnić „wdrożone” od „wdrożone, ale stare”.
+        "build": os.environ.get("ZOTERO20_BUILD", "unknown"),
+        "zotero": zotero,
+    }
+    if verbose:
+        payload["verbose"] = True
+        payload["web_api_configured"] = web_api_configured()
+        payload["styles_count"] = len(list_styles())
+        payload["default_style"] = DEFAULT_STYLE_ID
+    return payload, ok
+
+
+@json_api
+def health(request):
+    verbose = request.GET.get("verbose") in ("1", "true", "yes")
+    payload, ok = _health_payload(verbose=verbose)
+    return JsonResponse(payload, status=200 if ok else 503)
 
 
 @json_api
@@ -143,6 +158,38 @@ def import_doi(request):
 
     client, source = get_zotero_client()
     try:
+        existing = client.find_item_in_collection_by_doi(doi, collection_key)
+        if existing:
+            return JsonResponse(
+                {
+                    "duplicate": True,
+                    "message": "Pozycja już w kolekcji",
+                    "doi": doi,
+                    "collection_key": collection_key,
+                    "source": source,
+                    "item_key": existing.get("key", ""),
+                    "title": existing.get("title", ""),
+                    "citation_text": existing.get("citation_text", ""),
+                    "in_collection": True,
+                }
+            )
+
+        lib_existing = client.find_item_by_doi(doi)
+        if lib_existing and lib_existing.get("key"):
+            return JsonResponse(
+                {
+                    "duplicate": True,
+                    "message": "Pozycja z tym DOI już jest w bibliotece Zotero",
+                    "doi": doi,
+                    "collection_key": collection_key,
+                    "source": source,
+                    "item_key": lib_existing.get("key", ""),
+                    "title": lib_existing.get("title", ""),
+                    "citation_text": lib_existing.get("citation_text", ""),
+                    "in_collection": False,
+                }
+            )
+
         result = client.add_item_by_id(doi, collection_key)
     except ZoteroClientError as exc:
         return JsonResponse({"error": str(exc)}, status=502)
@@ -244,19 +291,28 @@ def collection_items(request):
     limit = int(request.GET.get("limit", 20))
     limit = max(1, min(limit, 100))
 
+    dedupe = request.GET.get("dedupe_doi", "1") not in ("0", "false", "no")
     client, source = get_zotero_client()
     try:
         items = client.list_collection_items(collection_key, limit=limit)
     except ZoteroClientError as exc:
         return JsonResponse({"error": str(exc)}, status=502)
 
-    return JsonResponse(
-        {
-            "collection_key": collection_key,
-            "source": source,
-            "items": items,
-        }
-    )
+    hidden_duplicates = 0
+    if dedupe:
+        items, hidden_duplicates = dedupe_collection_items_by_doi(items)
+
+    response = {
+        "collection_key": collection_key,
+        "source": source,
+        "items": items,
+    }
+    if hidden_duplicates:
+        response["hidden_duplicate_dois"] = hidden_duplicates
+        response["doi_dedup_note"] = (
+            "Zotero nie blokuje duplikatów DOI w kolekcji — serwer ukrywa powtórki na liście."
+        )
+    return JsonResponse(response)
 
 
 @json_api
@@ -396,3 +452,111 @@ def item_detail(request, item_key):
         return JsonResponse({"error": "Nie znaleziono pozycji."}, status=404)
 
     return JsonResponse({"source": source, "item": item})
+
+
+@json_api
+def debug_health(request):
+    if request.method != "GET":
+        return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
+    verbose = request.GET.get("verbose", "1") not in ("0", "false", "no")
+    payload, ok = _health_payload(verbose=verbose)
+    payload["endpoint"] = "debug/health"
+    return JsonResponse(payload, status=200 if ok else 503)
+
+
+@json_api
+def debug_item(request, item_key):
+    if request.method != "GET":
+        return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
+
+    style = (request.GET.get("style") or "").strip()
+    client, source = get_zotero_client()
+    try:
+        item = client.get_item(item_key)
+    except ZoteroClientError as exc:
+        return JsonResponse({"error": str(exc)}, status=502)
+
+    if not item:
+        return JsonResponse({"error": "Nie znaleziono pozycji."}, status=404)
+
+    citation_trace = trace_item_citation(client, item_key, style or None)
+    payload = {
+        "source": source,
+        "item_key": item_key,
+        "item": item,
+        "doi": item.get("doi", ""),
+        "citation_trace": citation_trace,
+    }
+    if style:
+        try:
+            resolved_style = resolve_style_id(style)
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+        payload["style"] = resolved_style
+        payload["style_label"] = style_label(resolved_style)
+    return JsonResponse(payload)
+
+
+@json_api
+def debug_citations(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
+
+    body = parse_json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Nieprawidłowy JSON."}, status=400)
+
+    try:
+        style = resolve_style_id(body.get("style"))
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    item_keys, error = _parse_item_keys(body.get("item_keys"))
+    if error is not None:
+        return error
+
+    client, source = get_zotero_client()
+    try:
+        payload = build_document_citations_debug(client, source, item_keys, style)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except ZoteroClientError as exc:
+        return JsonResponse({"error": str(exc)}, status=502)
+    return JsonResponse(payload)
+
+
+@json_api
+def debug_styles(request):
+    if request.method != "GET":
+        return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
+    return JsonResponse(
+        {
+            "styles": list_styles(),
+            "default": DEFAULT_STYLE_ID,
+            "endpoint": "debug/styles",
+        }
+    )
+
+
+@json_api
+def debug_echo(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
+
+    body = parse_json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Nieprawidłowy JSON."}, status=400)
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "method": request.method,
+            "path": request.path,
+            "headers": {
+                "x-api-key": "present" if request.headers.get("X-API-Key") else "missing",
+                "authorization": "present" if request.headers.get("Authorization") else "missing",
+                "content-type": request.headers.get("Content-Type", ""),
+            },
+            "body": body,
+        }
+    )

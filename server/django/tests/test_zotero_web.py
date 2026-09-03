@@ -72,3 +72,22 @@ class TestZoteroWebClient:
         client = ZoteroWebClient()
         text = client.fetch_item_citation(ITEM_KEY_1, "apa")
         assert text == "(Smith, 2013)"
+
+    @responses.activate
+    @override_settings(ZOTERO_WEB_API_KEY="web-test-key", ZOTERO_WEB_USER_ID="12345")
+    def test_fetch_item_citation_falls_back_to_batch_when_html_export_fails(self):
+        register_web_api(responses)
+        responses.replace(
+            responses.GET,
+            "https://api.zotero.org/users/12345/items/ITEMKEY1",
+            status=502,
+            body="upstream error",
+            match=[
+                responses.matchers.query_param_matcher(
+                    {"format": "citation", "style": "apa", "locale": "pl-PL"}
+                )
+            ],
+        )
+        client = ZoteroWebClient()
+        text = client.fetch_item_citation(ITEM_KEY_1, "apa")
+        assert text == "(Smith, 2013)"

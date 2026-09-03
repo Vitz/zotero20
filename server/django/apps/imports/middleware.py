@@ -25,7 +25,7 @@ def parse_json_body(request):
 
 
 DOI_RE = re.compile(
-    r"^(?:https?://(?:dx\.)?doi\.org/)?(?:doi:)?(10\.\d{4,9}/\S+)$",
+    r"^(?:https?://(?:dx\.)?doi\.org/)?(?:doi:)?(10\.\d+/\S+)$",
     re.IGNORECASE,
 )
 

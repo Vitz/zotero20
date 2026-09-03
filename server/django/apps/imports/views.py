@@ -255,6 +255,16 @@ def import_orcid(request):
 
     orcid = normalize_orcid(orcid_raw)
     if not orcid:
+        if normalize_doi(orcid_raw):
+            return JsonResponse(
+                {
+                    "error": (
+                        "To wygląda na DOI artykułu, nie identyfikator ORCID. "
+                        "Użyj zakładki „Pojedynczy DOI”."
+                    )
+                },
+                status=400,
+            )
         return JsonResponse({"error": "Nieprawidłowy format ORCID."}, status=400)
 
     limit = max(1, min(limit, 200))

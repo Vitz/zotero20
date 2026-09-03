@@ -181,8 +181,8 @@
 
   <div class="tabs">
     <button type="button" onclick="showTab('settings')">Ustawienia</button>
-    <button type="button" onclick="showTab('doi')">DOI</button>
-    <button type="button" onclick="showTab('orcid')">ORCID</button>
+    <button type="button" onclick="showTab('doi')">Pojedynczy DOI</button>
+    <button type="button" onclick="showTab('orcid')">Autor (ORCID)</button>
     <button type="button" onclick="showTab('biblio')">Cytowania</button>
     <button type="button" onclick="showTab('kolekcja')">Kolekcja</button>
     <button type="button" onclick="showTab('status')">Status</button>
@@ -237,8 +237,12 @@
       <strong>Kolekcja tego dokumentu</strong>
       <span id="current-collection-doi-label"></span>
     </div>
-    <label for="doi">DOI</label>
-    <input id="doi" type="text" placeholder="10.1038/nature12373">
+    <label for="doi">DOI artykułu</label>
+    <input id="doi" type="text" placeholder="10.14313/PAR_255/81">
+    <p class="hint" style="font-size:11px;color:#555;margin-top:4px;">
+      Numer DOI <strong>jednej</strong> publikacji (np. <code>10.1038/…</code> lub polski <code>10.14313/PAR_255/81</code>).
+      Import wielu prac autora — zakładka „Autor (ORCID)”.
+    </p>
     <button id="btn-import-doi" type="button" onclick="doImportDoi()" disabled>Importuj DOI</button>
     <details id="advanced-doi" style="display:none;">
       <summary>Zaawansowane: nadpisz badaniem z studies.yaml</summary>
@@ -252,15 +256,27 @@
       <strong>Kolekcja tego dokumentu</strong>
       <span id="current-collection-orcid-label"></span>
     </div>
-    <label for="orcid">ORCID</label>
+    <label for="orcid">Identyfikator ORCID autora</label>
     <input id="orcid" type="text" placeholder="0000-0002-1825-0097">
-    <label for="limit">Limit prac</label>
-    <input id="limit" type="number" value="50" min="1" max="200">
-    <button id="btn-import-orcid" type="button" onclick="doImportOrcid()" disabled>Importuj prace ORCID</button>
-    <details id="advanced-orcid" style="display:none;">
-      <summary>Zaawansowane: nadpisz badaniem z studies.yaml</summary>
-      <label for="study-orcid">Badanie (opcjonalnie)</label>
-      <select id="study-orcid" disabled></select>
+    <p class="hint" style="font-size:11px;color:#555;margin-top:4px;">
+      Profil ORCID <strong>autora</strong> (format <code>0000-0002-1825-0097</code>), nie DOI artykułu.
+      Pojedynczy artykuł — zakładka „Pojedynczy DOI”.
+    </p>
+    <button id="btn-import-orcid" type="button" onclick="doImportOrcid()" disabled>Importuj prace z ORCID</button>
+    <details id="advanced-orcid" style="margin-top:8px;">
+      <summary>Zaawansowane (import ORCID)</summary>
+      <label for="limit">Limit publikacji z profilu</label>
+      <input id="limit" type="number" value="50" min="1" max="200">
+      <p class="hint" style="font-size:11px;color:#555;margin-top:4px;">
+        Ile prac pobrać z profilu ORCID przy jednym imporcie (1–200). Nie dotyczy importu pojedynczego DOI.
+      </p>
+      <div id="advanced-orcid-study" style="display:none;">
+        <label for="study-orcid">Badanie (opcjonalnie)</label>
+        <select id="study-orcid" disabled></select>
+        <p class="hint" style="font-size:11px;color:#555;margin-top:4px;">
+          Nadpisz kolekcję dokumentu badaniem z <code>studies.yaml</code>.
+        </p>
+      </div>
     </details>
   </div>
 
@@ -373,7 +389,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.0.5';
+    var SIDEBAR_VERSION = '2.0.6';
 
     var lastImport = { doi: '', orcid: '', itemKey: '', citationText: '', identifiers: null };
     var duplicateItem = null;
@@ -1435,13 +1451,13 @@
 
       if (!configured.length) {
         document.getElementById('advanced-doi').style.display = 'none';
-        document.getElementById('advanced-orcid').style.display = 'none';
+        document.getElementById('advanced-orcid-study').style.display = 'none';
         showStudiesWarning('');
         return;
       }
 
       document.getElementById('advanced-doi').style.display = 'block';
-      document.getElementById('advanced-orcid').style.display = 'block';
+      document.getElementById('advanced-orcid-study').style.display = 'block';
 
       ['study-doi', 'study-orcid'].forEach(function (id) {
         var sel = document.getElementById(id);
@@ -1572,9 +1588,33 @@
       return { collectionKey: appState.defaultCollection.key };
     }
 
+    function stripDoiPrefix(value) {
+      var v = String(value || '').trim();
+      v = v.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '');
+      return v.replace(/^doi:\s*/i, '').trim();
+    }
+
+    function looksLikeDoi(value) {
+      var v = stripDoiPrefix(value);
+      if (!v) return false;
+      return /^10\.\S+\/\S+/i.test(v);
+    }
+
+    function looksLikeOrcid(value) {
+      var v = String(value || '').trim().replace(/^https?:\/\/orcid\.org\//i, '');
+      return /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/i.test(v);
+    }
+
     function doImportDoi() {
       var doi = document.getElementById('doi').value.trim();
       if (!doi) { setStatus('Podaj DOI.', true); return; }
+      if (looksLikeOrcid(doi)) {
+        document.getElementById('orcid').value = doi;
+        showTab('orcid');
+        setStatus('Wykryto ORCID — przełączono na import prac autora.', false);
+        doImportOrcid();
+        return;
+      }
       var target = resolveImportTarget('study-doi');
       if (!target) return;
       hidePostImport();
@@ -1628,6 +1668,13 @@
       var orcid = document.getElementById('orcid').value.trim();
       var limit = parseInt(document.getElementById('limit').value, 10) || 50;
       if (!orcid) { setStatus('Podaj ORCID.', true); return; }
+      if (looksLikeDoi(orcid)) {
+        document.getElementById('doi').value = orcid;
+        showTab('doi');
+        setStatus('Wykryto DOI — przełączono na import pojedynczego artykułu.', false);
+        doImportDoi();
+        return;
+      }
       var target = resolveImportTarget('study-orcid');
       if (!target) return;
       setStatus('Importuję prace ORCID… (może potrwać)');

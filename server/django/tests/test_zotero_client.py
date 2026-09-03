@@ -19,6 +19,7 @@ class TestNormalizeHelpers:
         assert normalize_doi("10.1038/nature12373") == "10.1038/nature12373"
         assert normalize_doi("https://doi.org/10.1038/nature12373") == "10.1038/nature12373"
         assert normalize_doi("doi:10.1038/nature12373") == "10.1038/nature12373"
+        assert normalize_doi("10.14313/PAR_255/81") == "10.14313/PAR_255/81"
         assert normalize_doi("invalid") is None
 
     def test_normalize_orcid(self):

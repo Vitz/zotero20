@@ -1,7 +1,7 @@
 # Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
-Wersja plików Apps Script: **2.0.9** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+Wersja plików Apps Script: **2.1.0** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
 
 ## Co robi panel
 
@@ -80,14 +80,19 @@ i czyści stary rejestr. Cytowania, których `NamedRange` już nie istnieje (typ
 
 ## Sprawdzenie, czy serwer ma aktualny kod
 
-`GET https://zotero.keyweb.pl/api/v1/health` zwraca pole `build` z tagiem wdrożonego obrazu.
+`GET https://zotero.keyweb.pl/api/v1/health` (publiczny, szybki) zwraca `status` + `build` z tagiem wdrożonego obrazu — bez pingowania Zotero.
 Jeśli pola `build` **nie ma**, domena kieruje na starą instancję i nowe endpointy (`/citations`)
 nie będą działać, nawet gdy GitHub Actions pokazuje udany deploy.
+
+`GET /api/v1/health/zotero` (wymaga `X-API-Key`) sprawdza połączenie Django ↔ Zotero (Web API lub Local).
+Panel pokazuje obie kropki statusu (API / Zotero) przy tytule i odświeża je co ~3 s.
 
 ## Endpointy używane przez panel
 
 | Endpoint | Do czego |
 |----------|----------|
+| `GET /health` | liveness API (kropka „API”) |
+| `GET /health/zotero` | połączenie z Zotero (kropka „Zotero”) |
 | `GET /styles` | lista stylów CSL |
 | `GET /items/<key>?style=` | tekst cytowania pojedynczej pozycji |
 | `POST /citations` | cytowania w tekście **i** bibliografia dla listy `item_keys` (jeden styl) |
@@ -104,6 +109,9 @@ nie będą działać, nawet gdy GitHub Actions pokazuje udany deploy.
 | „Brak placeholdera” | Tryb placeholderów, brak dopasowania w tekście | Wpisz `[*]`, `[DOI]`, `[10.xxxx/…]` lub `[DOI:10.xxxx/…]`, albo przełącz tryb na „w miejscu kursora” |
 | „Brak bibliografii w dokumencie” przy odświeżaniu | Sekcja została usunięta z dokumentu | Użyj **Wstaw bibliografię** |
 | Pusta lista kolekcji | Serwer bez `ZOTERO_WEB_API_KEY` albo pusta biblioteka Docker | Sprawdź `GET /api/v1/collections` (`"source"` = `"web"`), albo wpisz klucz kolekcji ręcznie |
+| Szara kropka „Zotero” | Brak `ZOTERO20_API_KEY` w Script Properties | Ustaw klucz jak w `.env` na serwerze |
+| Czerwona kropka „API” | Serwer / domena niedostępna | Sprawdź `curl …/api/v1/health` i deploy |
+| Czerwona kropka „Zotero” | Zotero Web/Local API nie odpowiada | Sprawdź `curl -H "X-API-Key: …" …/api/v1/health/zotero` |
 | „Nieprawidłowy klucz API” | Zły `ZOTERO20_API_KEY` | Ustaw ten sam klucz co w `.env` na serwerze |
 
 Test z serwera:

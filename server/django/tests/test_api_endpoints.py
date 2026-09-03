@@ -17,31 +17,66 @@ from tests.helpers.zotero_mock import (
 
 @pytest.mark.django_db
 class TestHealthEndpoint:
-    @responses.activate
     def test_health_no_api_key_required(self, api_client):
-        register_local_zotero_base(responses)
         response = api_client.get("/api/v1/health")
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "ok"
         assert data["service"] == "zotero20-api"
-        assert "zotero" in data
+        assert "build" in data
+        assert "zotero" not in data
+
+    def test_health_live_alias(self, api_client):
+        response = api_client.get("/api/v1/health/live")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert "build" in data
+
+
+@pytest.mark.django_db
+class TestHealthZoteroEndpoint:
+    def test_requires_api_key(self, api_client):
+        response = api_client.get("/api/v1/health/zotero")
+        assert response.status_code == 401
 
     @responses.activate
-    def test_health_degraded_when_ping_fails(self, api_client):
+    def test_ok_local(self, api_client, auth_headers):
+        register_local_zotero_base(responses)
+        response = api_client.get("/api/v1/health/zotero", **auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["zotero"]["api"] == "local"
+        assert data["zotero"]["reachable"] is True
+
+    @responses.activate
+    def test_error_when_ping_fails(self, api_client, auth_headers):
         responses.add(
             responses.GET,
             "http://127.0.0.1:23119/connector/ping",
             status=503,
         )
-        responses.add(
-            responses.GET,
-            "http://127.0.0.1:23119/api/plus/health",
-            status=404,
-        )
-        response = api_client.get("/api/v1/health")
+        response = api_client.get("/api/v1/health/zotero", **auth_headers)
         assert response.status_code == 503
-        assert response.json()["status"] == "degraded"
+        data = response.json()
+        assert data["status"] == "error"
+        assert data["zotero"]["reachable"] is False
+        assert data["zotero"].get("error")
+
+    @responses.activate
+    @override_settings(ZOTERO_WEB_API_KEY="web-test-key", ZOTERO_WEB_USER_ID="12345")
+    def test_ok_web(self, api_client, auth_headers):
+        from tests.helpers.zotero_mock import register_web_api
+
+        register_web_api(responses)
+        response = api_client.get("/api/v1/health/zotero", **auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["zotero"]["api"] == "web"
+        assert data["zotero"]["reachable"] is True
+        assert data["zotero"]["user_id"] == "12345"
 
 
 @pytest.mark.django_db

@@ -480,6 +480,16 @@ class ZoteroWebClient:
             )
         return response.text
 
+    def reachability_check(self, timeout: float = 5.0) -> dict:
+        """Lekki ping Web API (tylko userID) — bez listowania kolekcji ani citeproc."""
+        previous = self.timeout
+        self.timeout = timeout
+        try:
+            user_id = self.resolve_user_id()
+            return {"api": "web", "reachable": True, "user_id": user_id}
+        finally:
+            self.timeout = previous
+
     def health_summary(self) -> dict:
         summary = {"api": "web", "configured": True, "user_id": None, "collections_count": None}
         try:

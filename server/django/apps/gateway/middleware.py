@@ -70,7 +70,8 @@ class ApiKeyMiddleware:
         if any(path.startswith(prefix) for prefix in self.EXEMPT_PREFIXES):
             return False
 
-        if path == "/api/v1/health":
+        # Publiczne liveness (bez Zotero). /health/zotero wymaga klucza — trafia w zotero.org.
+        if path in ("/api/v1/health", "/api/v1/health/live"):
             return False
 
         if path.startswith("/api/v1/"):

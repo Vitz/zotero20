@@ -27,11 +27,17 @@ class TestApiKeyMiddleware:
         response = api_client.get("/api/v1/collections", **bearer_headers)
         assert response.status_code == 200
 
-    @responses.activate
     def test_health_exempt_from_api_key(self, api_client):
-        register_local_zotero_base(responses)
         response = api_client.get("/api/v1/health")
         assert response.status_code == 200
+
+    def test_health_live_exempt_from_api_key(self, api_client):
+        response = api_client.get("/api/v1/health/live")
+        assert response.status_code == 200
+
+    def test_health_zotero_requires_api_key(self, api_client):
+        response = api_client.get("/api/v1/health/zotero")
+        assert response.status_code == 401
 
     @override_settings(DEBUG=True, API_KEY="")
     @responses.activate

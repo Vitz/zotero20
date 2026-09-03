@@ -270,7 +270,9 @@ Endpointy (propozycja):
 | `POST` | `/api/v1/import/doi` | `{ "doi": "...", "study": "badanie-1" }` |
 | `POST` | `/api/v1/import/orcid` | `{ "orcid": "0000-0002-...", "study": "badanie-1", "limit": 50 }` |
 | `GET` | `/api/v1/studies` | Lista mapowań `study_slug → collectionKey` |
-| `GET` | `/api/v1/health` | Healthcheck |
+| `GET` | `/api/v1/health` | Liveness (status + build, bez Zotero) |
+| `GET` | `/api/v1/health/live` | Alias liveness |
+| `GET` | `/api/v1/health/zotero` | Lekki ping Django ↔ Zotero (wymaga API key) |
 
 Auth: ten sam Cloudflare Access **lub** osobny API key w nagłówku `X-API-Key` (dodatkowa warstwa w Django).
 

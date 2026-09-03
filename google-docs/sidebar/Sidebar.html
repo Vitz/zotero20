@@ -4,7 +4,44 @@
   <base target="_top">
   <style>
     body { font-family: Arial, sans-serif; font-size: 13px; margin: 12px; color: #222; }
-    h2 { font-size: 15px; margin: 0 0 8px; }
+    h2 { font-size: 15px; margin: 0; }
+    .title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 0 0 8px;
+    }
+    .health-dots {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .health-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: default;
+    }
+    .health-label {
+      font-size: 10px;
+      font-weight: normal;
+      color: #555;
+      letter-spacing: 0.02em;
+    }
+    .health-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      display: inline-block;
+      border: 1px solid rgba(0, 0, 0, 0.15);
+      box-sizing: border-box;
+    }
+    .health-ok { background: #2e7d32; }
+    .health-error { background: #c62828; }
+    .health-loading { background: #f9a825; }
+    .health-no_key { background: #9e9e9e; }
     label { display: block; margin-top: 10px; font-weight: bold; }
     input, select { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 6px; }
     button { margin-top: 12px; width: 100%; padding: 8px; cursor: pointer; }
@@ -175,7 +212,19 @@
   </style>
 </head>
 <body>
-  <h2>Zotero20 Import</h2>
+  <div class="title-row">
+    <h2>Zotero20 Import</h2>
+    <div class="health-dots" aria-label="Status połączenia">
+      <span class="health-item" id="health-item-api">
+        <span id="health-dot-api" class="health-dot health-loading" aria-hidden="true"></span>
+        <span class="health-label">API</span>
+      </span>
+      <span class="health-item" id="health-item-zotero">
+        <span id="health-dot-zotero" class="health-dot health-loading" aria-hidden="true"></span>
+        <span class="health-label">Zotero</span>
+      </span>
+    </div>
+  </div>
   <p>Importuj źródła do kolekcji na serwerze, wstawiaj śledzone cytowania i buduj bibliografię z tego, co faktycznie zacytowane.</p>
   <div id="version-warning"></div>
 
@@ -389,7 +438,17 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.0.9';
+    var SIDEBAR_VERSION = '2.1.0';
+
+    // UrlFetchApp ma limity dzienne — 3 s to kompromis vs prośba o 1 s.
+    // Przy długim otwarciu sidebara rozważ później 5 s w ustawieniach.
+    var HEALTH_POLL_MS = 3000;
+    var healthPollState = {
+      apiBusy: false,
+      zoteroBusy: false,
+      api: null,
+      zotero: null,
+    };
 
     var lastImport = { doi: '', orcid: '', itemKey: '', citationText: '', identifiers: null };
     var duplicateItem = null;
@@ -431,6 +490,112 @@
             'skopiuj do Apps Script aktualny Code.gs z repozytorium.';
         })
         .getAddonVersion();
+    }
+
+    function formatHealthTime(iso) {
+      if (!iso) return '—';
+      try {
+        var d = new Date(iso);
+        if (isNaN(d.getTime())) return String(iso);
+        return d.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      } catch (ignore) {
+        return String(iso);
+      }
+    }
+
+    function applyHealthDot(kind, result) {
+      var dot = document.getElementById('health-dot-' + kind);
+      var item = document.getElementById('health-item-' + kind);
+      if (!dot || !item) return;
+
+      var state = 'loading';
+      if (result) {
+        if (result.status === 'no_key') state = 'no_key';
+        else if (result.ok || result.status === 'ok') state = 'ok';
+        else state = 'error';
+      }
+
+      dot.className = 'health-dot health-' + state;
+
+      var label = kind === 'api' ? 'API (serwer)' : 'Zotero';
+      var lines = [label + ': '];
+      if (state === 'loading') {
+        lines[0] += 'sprawdzanie…';
+      } else if (state === 'ok') {
+        lines[0] += 'OK';
+        if (kind === 'api' && result && result.build) {
+          lines.push('Build: ' + result.build);
+        }
+        if (kind === 'zotero' && result && result.zotero) {
+          var z = result.zotero;
+          lines.push('API: ' + (z.api || '?'));
+          if (z.user_id) lines.push('user_id: ' + z.user_id);
+        }
+      } else if (state === 'no_key') {
+        lines[0] += 'brak klucza API';
+      } else {
+        lines[0] += 'błąd';
+        if (result && result.error) lines.push(String(result.error));
+      }
+      if (result && result.checkedAt) {
+        lines.push('Ostatnie sprawdzenie: ' + formatHealthTime(result.checkedAt));
+      }
+      item.title = lines.join('\n');
+    }
+
+    function pollApiHealth() {
+      if (healthPollState.apiBusy) return;
+      healthPollState.apiBusy = true;
+      if (!healthPollState.api) applyHealthDot('api', null);
+      google.script.run
+        .withSuccessHandler(function (r) {
+          healthPollState.apiBusy = false;
+          healthPollState.api = r || { ok: false, status: 'error', error: 'Pusta odpowiedź' };
+          applyHealthDot('api', healthPollState.api);
+        })
+        .withFailureHandler(function (e) {
+          healthPollState.apiBusy = false;
+          healthPollState.api = {
+            ok: false,
+            status: 'error',
+            checkedAt: new Date().toISOString(),
+            error: formatScriptError(e),
+          };
+          applyHealthDot('api', healthPollState.api);
+        })
+        .pingApiHealth();
+    }
+
+    function pollZoteroHealth() {
+      if (healthPollState.zoteroBusy) return;
+      healthPollState.zoteroBusy = true;
+      if (!healthPollState.zotero) applyHealthDot('zotero', null);
+      google.script.run
+        .withSuccessHandler(function (r) {
+          healthPollState.zoteroBusy = false;
+          healthPollState.zotero = r || { ok: false, status: 'error', error: 'Pusta odpowiedź' };
+          applyHealthDot('zotero', healthPollState.zotero);
+        })
+        .withFailureHandler(function (e) {
+          healthPollState.zoteroBusy = false;
+          healthPollState.zotero = {
+            ok: false,
+            status: 'error',
+            checkedAt: new Date().toISOString(),
+            error: formatScriptError(e),
+          };
+          applyHealthDot('zotero', healthPollState.zotero);
+        })
+        .pingZoteroHealth();
+    }
+
+    function startHealthPolling() {
+      applyHealthDot('api', null);
+      applyHealthDot('zotero', null);
+      pollApiHealth();
+      pollZoteroHealth();
+      setInterval(pollApiHealth, HEALTH_POLL_MS);
+      setInterval(pollZoteroHealth, HEALTH_POLL_MS);
     }
 
     function updateCollectionsSourceHint(source) {
@@ -1728,6 +1893,7 @@
       initKolekcjaSearch();
       setStatus('Ładowanie…');
       checkAddonVersion();
+      startHealthPolling();
       loadDefaultCollection();
       loadCollections();
       loadStudiesOptional();

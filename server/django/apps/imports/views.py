@@ -58,6 +58,16 @@ def _zotero_collections_payload() -> dict:
         }
 
 
+def _live_payload() -> dict:
+    """Szybki ping Django — bez wywołań Zotero (liveness / kropka API w sidebarze)."""
+    return {
+        "status": "ok",
+        "service": "zotero20-api",
+        # Tag obrazu — bez tego nie da się odróżnić „wdrożone” od „wdrożone, ale stare”.
+        "build": os.environ.get("ZOTERO20_BUILD", "unknown"),
+    }
+
+
 def _health_payload(verbose: bool = False) -> tuple[dict, bool]:
     if web_api_configured():
         from .services.zotero_web import ZoteroWebClient
@@ -73,7 +83,6 @@ def _health_payload(verbose: bool = False) -> tuple[dict, bool]:
     payload = {
         "status": "ok" if ok else "degraded",
         "service": "zotero20-api",
-        # Tag obrazu — bez tego nie da się odróżnić „wdrożone” od „wdrożone, ale stare”.
         "build": os.environ.get("ZOTERO20_BUILD", "unknown"),
         "zotero": zotero,
     }
@@ -85,10 +94,62 @@ def _health_payload(verbose: bool = False) -> tuple[dict, bool]:
     return payload, ok
 
 
+def _zotero_reachability_payload() -> tuple[dict, bool]:
+    """Lekki check Django ↔ Zotero (Web API lub Local)."""
+    try:
+        if web_api_configured():
+            from .services.zotero_web import ZoteroWebClient
+
+            zotero = ZoteroWebClient().reachability_check(timeout=5.0)
+        else:
+            zotero = ZoteroClient(timeout=5).reachability_check(timeout=5.0)
+        return {"status": "ok", "zotero": zotero}, True
+    except ZoteroClientError as exc:
+        api = "web" if web_api_configured() else "local"
+        return {
+            "status": "error",
+            "zotero": {
+                "api": api,
+                "reachable": False,
+                "user_id": None,
+                "error": str(exc),
+            },
+        }, False
+    except Exception as exc:  # noqa: BLE001 — health nie może padać 500 na timeoutach sieci
+        api = "web" if web_api_configured() else "local"
+        return {
+            "status": "error",
+            "zotero": {
+                "api": api,
+                "reachable": False,
+                "user_id": None,
+                "error": str(exc),
+            },
+        }, False
+
+
 @json_api
 def health(request):
+    """Liveness API (bez Zotero). Pełny diagnostyczny payload: ?verbose=1 lub /debug/health."""
     verbose = request.GET.get("verbose") in ("1", "true", "yes")
-    payload, ok = _health_payload(verbose=verbose)
+    if verbose:
+        payload, ok = _health_payload(verbose=True)
+        return JsonResponse(payload, status=200 if ok else 503)
+    return JsonResponse(_live_payload())
+
+
+@json_api
+def health_live(request):
+    """Alias publicznego pinga — to samo co GET /health bez verbose."""
+    return JsonResponse(_live_payload())
+
+
+@json_api
+def health_zotero(request):
+    """Lekki check połączenia z Zotero (wymaga X-API-Key — trafia w zotero.org / Local API)."""
+    if request.method != "GET":
+        return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
+    payload, ok = _zotero_reachability_payload()
     return JsonResponse(payload, status=200 if ok else 503)
 
 

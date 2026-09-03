@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.0.9';
+const ADDON_VERSION = '2.1.0';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -160,6 +160,107 @@ function getBibliographyStyles() {
 
 function getAddonVersion() {
   return ADDON_VERSION;
+}
+
+/**
+ * Szybki ping Django (GET /health) — bez klucza API.
+ * Zwraca obiekt statusu zamiast rzucać, żeby kropka w sidebarze mogła pokazać błąd.
+ */
+function pingApiHealth() {
+  var checkedAt = new Date().toISOString();
+  try {
+    var response = UrlFetchApp.fetch(API_BASE + '/health', {
+      method: 'get',
+      muteHttpExceptions: true,
+      headers: { Accept: 'application/json' },
+    });
+    var code = response.getResponseCode();
+    var body = {};
+    try {
+      body = JSON.parse(response.getContentText() || '{}');
+    } catch (ignore) {
+      body = {};
+    }
+    var ok = code >= 200 && code < 300 && body.status === 'ok';
+    return {
+      ok: ok,
+      status: ok ? 'ok' : 'error',
+      build: body.build || '',
+      http: code,
+      checkedAt: checkedAt,
+      error: ok ? '' : String(body.error || body.detail || ('HTTP ' + code)),
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      status: 'error',
+      build: '',
+      http: 0,
+      checkedAt: checkedAt,
+      error: String((e && e.message) || e),
+    };
+  }
+}
+
+/**
+ * Lekki check Django ↔ Zotero (GET /health/zotero) — z X-API-Key.
+ * status: ok | error | no_key
+ */
+function pingZoteroHealth() {
+  var checkedAt = new Date().toISOString();
+  var apiKey = PropertiesService.getScriptProperties().getProperty('ZOTERO20_API_KEY');
+  if (!apiKey) {
+    return {
+      ok: false,
+      status: 'no_key',
+      zotero: null,
+      http: 0,
+      checkedAt: checkedAt,
+      error: 'Brak ZOTERO20_API_KEY w Script Properties.',
+    };
+  }
+  try {
+    var response = UrlFetchApp.fetch(API_BASE + '/health/zotero', {
+      method: 'get',
+      muteHttpExceptions: true,
+      headers: {
+        Accept: 'application/json',
+        'X-API-Key': apiKey,
+      },
+    });
+    var code = response.getResponseCode();
+    var body = {};
+    try {
+      body = JSON.parse(response.getContentText() || '{}');
+    } catch (ignore) {
+      body = {};
+    }
+    var zotero = body.zotero || null;
+    var ok = code >= 200 && code < 300 && body.status === 'ok' && zotero && zotero.reachable;
+    var err = '';
+    if (!ok) {
+      err = String(
+        (zotero && zotero.error) || body.error || body.detail || ('HTTP ' + code)
+      );
+    }
+    return {
+      ok: !!ok,
+      status: ok ? 'ok' : 'error',
+      zotero: zotero,
+      http: code,
+      checkedAt: checkedAt,
+      error: err,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      status: 'error',
+      zotero: null,
+      http: 0,
+      checkedAt: checkedAt,
+      error: String((e && e.message) || e),
+    };
+  }
 }
 
 /** Styl jest wspólny dla cytowań w tekście i bibliografii — jedno źródło prawdy na dokument. */

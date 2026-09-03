@@ -416,6 +416,16 @@ class ZoteroClient:
             )
         return response.text
 
+    def reachability_check(self, timeout: float = 5.0) -> dict:
+        """Lekki ping Local API (connector/ping) — bez api-plus ani citeproc."""
+        previous = self.timeout
+        self.timeout = timeout
+        try:
+            self.ping()
+            return {"api": "local", "reachable": True, "user_id": None}
+        finally:
+            self.timeout = previous
+
     def health_summary(self) -> dict:
         summary = {"zotero_url": self.base_url, "ping": None, "api_plus": None}
         try:

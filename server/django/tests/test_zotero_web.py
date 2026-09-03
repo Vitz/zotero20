@@ -36,6 +36,14 @@ class TestZoteroWebClient:
 
     @responses.activate
     @override_settings(ZOTERO_WEB_API_KEY="web-test-key", ZOTERO_WEB_USER_ID="12345")
+    def test_create_collection(self):
+        register_web_api(responses)
+        client = ZoteroWebClient()
+        created = client.create_collection("Web Collection")
+        assert created == {"key": "WEBCOLL1", "name": "Web Collection"}
+
+    @responses.activate
+    @override_settings(ZOTERO_WEB_API_KEY="web-test-key", ZOTERO_WEB_USER_ID="12345")
     def test_add_item_creates_new(self):
         register_web_api(responses)
         responses.add(

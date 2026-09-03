@@ -109,6 +109,63 @@ class TestCollectionsEndpoint:
         response = api_client.get("/api/v1/collections", **auth_headers)
         assert response.status_code == 502
 
+    @responses.activate
+    def test_create_collection_requires_name(self, api_client, auth_headers):
+        response = api_client.post(
+            "/api/v1/collections",
+            data=json.dumps({}),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 400
+        assert "name" in response.json()["error"].lower()
+
+    @responses.activate
+    def test_create_collection_empty_name(self, api_client, auth_headers):
+        response = api_client.post(
+            "/api/v1/collections",
+            data=json.dumps({"name": "   "}),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 400
+
+    @responses.activate
+    def test_create_collection_local(self, api_client, auth_headers):
+        from tests.helpers.zotero_mock import register_create_collection
+
+        register_local_zotero_base(responses)
+        register_create_collection(responses, new_key="NEWCOLL1")
+        response = api_client.post(
+            "/api/v1/collections",
+            data=json.dumps({"name": "Nowa kolekcja"}),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["key"] == "NEWCOLL1"
+        assert data["name"] == "Nowa kolekcja"
+        assert data["source"] == "local"
+
+    @responses.activate
+    @override_settings(ZOTERO_WEB_API_KEY="web-test-key", ZOTERO_WEB_USER_ID="12345")
+    def test_create_collection_web(self, api_client, auth_headers):
+        from tests.helpers.zotero_mock import register_web_api
+
+        register_web_api(responses)
+        response = api_client.post(
+            "/api/v1/collections",
+            data=json.dumps({"name": "Web Collection"}),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["key"] == "WEBCOLL1"
+        assert data["name"] == "Web Collection"
+        assert data["source"] == "web"
+
 
 @pytest.mark.django_db
 class TestImportDoiEndpoint:

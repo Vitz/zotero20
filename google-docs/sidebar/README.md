@@ -1,7 +1,7 @@
 # Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
-Wersja plików Apps Script: **2.1.5** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+Wersja plików Apps Script: **2.1.6** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
 
 ## Co robi panel
 
@@ -70,14 +70,17 @@ to zabezpieczenie przed „naprawami, które nie działają, bo w Docs jest star
 Ustawienia per dokument (Document Properties, ustawiane z panelu):
 `ZOTERO20_DEFAULT_COLLECTION_KEY`, `ZOTERO20_DEFAULT_COLLECTION_NAME`,
 `ZOTERO20_BIBLIOGRAPHY_STYLE`, `ZOTERO20_BIBLIOGRAPHY_CITED_ONLY`, `ZOTERO20_CITATION_INSERT_MODE`,
-`ZOTERO20_CITATION_LOCALE` (`en-US` albo `pl-PL`; domyślnie `en-US` — „et al.”).
+`ZOTERO20_CITATION_LOCALE` (`en-US` albo `pl-PL`; domyślnie `en-US` — „et al.”),
+`ZOTERO20_BIBLIOGRAPHY_FONT` (np. `Arial`, `Times New Roman`; puste = domyślna dokumentu),
+`ZOTERO20_BIBLIOGRAPHY_FONT_SIZE` (9–14 pt; puste = bez wymuszania).
 Kolekcja i styl były wcześniej globalne (Script Properties) i przeciekały między dokumentami —
 przy pierwszym odczycie w danym dokumencie wartość z Script Properties jest kopiowana do Document Properties.
 
 ## Użycie
 
-1. **W każdym dokumencie:** zakładka **Ustawienia** → wybierz kolekcję tego dokumentu → **Zapisz**.
-   Tam też ustaw **Język cytowań** (English = *et al.*, Polski = *i in.*). Panel zostaje po polsku.
+1. **W każdym dokumencie:** zakładka **Ustawienia** → wybierz kolekcję tego dokumentu → **Zapisz**
+   (albo **Utwórz kolekcję**). Tam też ustaw **Język cytowań** (English = *et al.*, Polski = *i in.*)
+   oraz **Wygląd bibliografii** (czcionka / rozmiar). Panel zostaje po polsku.
 2. Zakładka **Cytowania** → wybierz styl CSL i tryb wstawiania (kursor / `[*]`).
 3. Zakładka **DOI** → zaimportuj pracę.
 4. Ustaw kursor w dokumencie → **Wstaw cytowanie**. Cytowanie zostaje kotwicą.

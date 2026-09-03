@@ -112,6 +112,33 @@ class ZoteroWebClient:
         items.sort(key=lambda item: (item["name"] or item["key"]).lower())
         return items
 
+    def create_collection(self, name: str) -> dict:
+        """Tworzy kolekcję przez Web API. Zwraca {key, name}."""
+        name = (name or "").strip()
+        if not name:
+            raise ZoteroClientError("Nazwa kolekcji nie może być pusta.", 400)
+
+        user_id = self.resolve_user_id()
+        response = self._session.post(
+            f"{ZOTERO_WEB_API_BASE}/users/{user_id}/collections",
+            json=[{"name": name, "parentCollection": False}],
+            timeout=self.timeout,
+        )
+        if response.status_code not in (200, 201, 207):
+            raise ZoteroClientError(
+                f"Web API create collection failed: HTTP {response.status_code} — "
+                f"{response.text[:500]}",
+                response.status_code,
+            )
+
+        key = self._extract_created_item_key(response)
+        if not key:
+            raise ZoteroClientError(
+                "Web API: utworzono kolekcję, ale nie udało się odczytać klucza.",
+                response.status_code,
+            )
+        return {"key": key, "name": name}
+
     def find_item_by_doi(self, doi: str) -> dict | None:
         """Szuka pozycji w bibliotece po DOI (Web API q=)."""
         doi = doi.strip()

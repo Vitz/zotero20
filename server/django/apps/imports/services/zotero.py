@@ -349,6 +349,56 @@ class ZoteroClient:
         items.sort(key=lambda item: (item["name"] or item["key"]).lower())
         return items
 
+    def create_collection(self, name: str) -> dict:
+        """Tworzy kolekcję w bibliotece Local API. Zwraca {key, name}."""
+        name = (name or "").strip()
+        if not name:
+            raise ZoteroClientError("Nazwa kolekcji nie może być pusta.", 400)
+
+        response = self._request(
+            "POST",
+            "/api/users/0/collections",
+            json=[{"name": name, "parentCollection": False}],
+            headers={"Content-Type": "application/json"},
+        )
+        if response.status_code not in (200, 201, 207):
+            raise ZoteroClientError(
+                f"create collection failed: HTTP {response.status_code} — "
+                f"{response.text[:500]}",
+                response.status_code,
+            )
+
+        key = self._extract_created_key_(response)
+        if not key:
+            raise ZoteroClientError(
+                "Utworzono kolekcję, ale nie udało się odczytać klucza.",
+                response.status_code,
+            )
+        return {"key": key, "name": name}
+
+    @staticmethod
+    def _extract_created_key_(response: requests.Response) -> str:
+        try:
+            body = response.json()
+        except ValueError:
+            return ""
+
+        if isinstance(body, dict):
+            successful = body.get("successful")
+            if isinstance(successful, dict):
+                for entry in successful.values():
+                    if isinstance(entry, dict) and entry.get("key"):
+                        return str(entry["key"])
+            if body.get("key"):
+                return str(body["key"])
+
+        if isinstance(body, list) and body:
+            first = body[0]
+            if isinstance(first, dict) and first.get("key"):
+                return str(first["key"])
+
+        return ""
+
     def fetch_item_bibliography(
         self,
         item_key: str,

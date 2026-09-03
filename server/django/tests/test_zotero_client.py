@@ -79,6 +79,22 @@ class TestZoteroClient:
         assert names == sorted(names, key=str.lower)
 
     @responses.activate
+    def test_create_collection(self):
+        from tests.helpers.zotero_mock import register_create_collection
+
+        register_local_zotero_base(responses)
+        register_create_collection(responses, new_key="NEWCOLL1")
+        client = ZoteroClient()
+        created = client.create_collection("Moja kolekcja")
+        assert created == {"key": "NEWCOLL1", "name": "Moja kolekcja"}
+
+    @responses.activate
+    def test_create_collection_rejects_empty_name(self):
+        client = ZoteroClient()
+        with pytest.raises(ZoteroClientError):
+            client.create_collection("  ")
+
+    @responses.activate
     def test_find_item_by_doi(self):
         register_local_zotero_base(responses)
         register_doi_search_found(responses)

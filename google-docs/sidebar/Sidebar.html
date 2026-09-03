@@ -371,6 +371,12 @@
       <option value="">Ładowanie kolekcji…</option>
     </select>
     <button id="btn-save-default" type="button" onclick="saveDefaultCollection()" disabled>Zapisz kolekcję dokumentu</button>
+    <label for="new-collection-name">Nowa kolekcja w Zotero</label>
+    <input id="new-collection-name" type="text" placeholder="np. Artykuł – roboczy" maxlength="200" spellcheck="false">
+    <button id="btn-create-collection" type="button" onclick="createNewCollection()">Utwórz kolekcję</button>
+    <p class="hint" style="font-size:11px;color:#555;margin-top:6px;">
+      Tworzy kolekcję w bibliotece na serwerze i ustawia ją jako kolekcję tego dokumentu.
+    </p>
     <p id="collections-source-hint" class="hint" style="font-size:11px;color:#555;margin-top:8px;">
       Ładowanie źródła kolekcji…
     </p>
@@ -410,6 +416,29 @@
       <option value="cursor">W miejscu kursora w dokumencie</option>
       <option value="placeholder">Zamiast [*] lub [DOI] w tekście</option>
     </select>
+
+    <h3 style="margin:16px 0 6px;font-size:13px;">Wygląd bibliografii</h3>
+    <label for="biblio-font">Czcionka</label>
+    <select id="biblio-font" onchange="persistBibliographyFont()">
+      <option value="">Domyślna dokumentu</option>
+      <option value="Arial">Arial</option>
+      <option value="Times New Roman">Times New Roman</option>
+      <option value="Calibri">Calibri</option>
+      <option value="Georgia">Georgia</option>
+    </select>
+    <label for="biblio-font-size">Rozmiar (pt)</label>
+    <select id="biblio-font-size" onchange="persistBibliographyFontSize()">
+      <option value="">Domyślny dokumentu</option>
+      <option value="9">9</option>
+      <option value="10">10</option>
+      <option value="11">11</option>
+      <option value="12">12</option>
+      <option value="14">14</option>
+    </select>
+    <p class="hint" style="font-size:11px;color:#555;margin-top:6px;">
+      Dotyczy nagłówka i wpisów bibliografii. Po zmianie kliknij <strong>Odśwież bibliografię</strong>
+      albo <strong>Zmień styl</strong> w zakładce Cytowania.
+    </p>
 
     <h3 style="margin:16px 0 6px;font-size:13px;">Tryb diagnostyczny</h3>
     <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin-top:4px;">
@@ -459,7 +488,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.1.5';
+    var SIDEBAR_VERSION = '2.1.6';
 
     // UrlFetchApp ma limity dzienne — 3 s to kompromis vs prośba o 1 s.
     // Przy długim otwarciu sidebara rozważ później 5 s w ustawieniach.
@@ -484,6 +513,8 @@
       wholeCollection: false,
       insertMode: 'cursor',
       citationLocale: 'en-US',
+      bibliographyFont: '',
+      bibliographyFontSize: 0,
       debugMode: false,
       citationSummary: { citation_count: 0, item_count: 0, has_bibliography: false },
     };
@@ -1444,6 +1475,62 @@
         })
         .withFailureHandler(function () {})
         .getCitationLocale();
+
+      google.script.run
+        .withSuccessHandler(function (font) {
+          appState.bibliographyFont = font || '';
+          var sel = document.getElementById('biblio-font');
+          if (sel) sel.value = appState.bibliographyFont;
+        })
+        .withFailureHandler(function () {})
+        .getBibliographyFont();
+
+      google.script.run
+        .withSuccessHandler(function (size) {
+          appState.bibliographyFontSize = size || 0;
+          var sel = document.getElementById('biblio-font-size');
+          if (sel) sel.value = appState.bibliographyFontSize ? String(appState.bibliographyFontSize) : '';
+        })
+        .withFailureHandler(function () {})
+        .getBibliographyFontSize();
+    }
+
+    function persistBibliographyFont() {
+      var sel = document.getElementById('biblio-font');
+      var font = sel ? String(sel.value || '') : '';
+      appState.bibliographyFont = font;
+      google.script.run
+        .withSuccessHandler(function (saved) {
+          appState.bibliographyFont = saved || '';
+          if (sel) sel.value = appState.bibliographyFont;
+          setStatus(
+            'Zapisano czcionkę bibliografii. Odśwież bibliografię albo kliknij „Zmień styl”, żeby zastosować w dokumencie.',
+            false
+          );
+        })
+        .withFailureHandler(function (e) {
+          setStatus(formatScriptError(e), true);
+        })
+        .saveBibliographyFont(font);
+    }
+
+    function persistBibliographyFontSize() {
+      var sel = document.getElementById('biblio-font-size');
+      var raw = sel ? String(sel.value || '') : '';
+      var size = raw ? parseInt(raw, 10) : '';
+      google.script.run
+        .withSuccessHandler(function (saved) {
+          appState.bibliographyFontSize = saved || 0;
+          if (sel) sel.value = appState.bibliographyFontSize ? String(appState.bibliographyFontSize) : '';
+          setStatus(
+            'Zapisano rozmiar czcionki bibliografii. Odśwież bibliografię albo kliknij „Zmień styl”, żeby zastosować w dokumencie.',
+            false
+          );
+        })
+        .withFailureHandler(function (e) {
+          setStatus(formatScriptError(e), true);
+        })
+        .saveBibliographyFontSize(size);
     }
 
     function persistWholeCollection() {
@@ -1846,6 +1933,62 @@
         return;
       }
       persistDefaultCollection(key, name);
+    }
+
+    function createNewCollection() {
+      var input = document.getElementById('new-collection-name');
+      var name = input ? String(input.value || '').trim() : '';
+      if (!name) {
+        setStatus('Podaj nazwę nowej kolekcji.', true);
+        if (input) input.focus();
+        return;
+      }
+      var btn = document.getElementById('btn-create-collection');
+      if (btn) btn.disabled = true;
+      setStatus('Tworzę kolekcję „' + name + '”…');
+      google.script.run
+        .withSuccessHandler(function (created) {
+          if (btn) btn.disabled = false;
+          if (!created || !created.key) {
+            setStatus('Serwer nie zwrócił klucza nowej kolekcji.', true);
+            return;
+          }
+          if (input) input.value = '';
+          // Odśwież listę i ustaw nową kolekcję jako kolekcję dokumentu.
+          google.script.run
+            .withSuccessHandler(function (data) {
+              updateCollectionsSourceHint(data.source || created.source || '');
+              appState.collections = data.collections || [];
+              var exists = appState.collections.some(function (c) {
+                return c.key === created.key;
+              });
+              if (!exists) {
+                appState.collections.push({ key: created.key, name: created.name || name });
+                appState.collections.sort(function (a, b) {
+                  return String(a.name || a.key).localeCompare(String(b.name || b.key), 'pl', {
+                    sensitivity: 'base',
+                  });
+                });
+              }
+              fillCollectionSelect('default-collection', created.key);
+              document.getElementById('btn-save-default').disabled = !appState.collections.length;
+              showManualCollectionBlock(!appState.collections.length);
+              persistDefaultCollection(created.key, created.name || name);
+            })
+            .withFailureHandler(function () {
+              // Lista się nie odświeżyła — dopisz lokalnie i zapisz kolekcję dokumentu.
+              appState.collections = [{ key: created.key, name: created.name || name }];
+              fillCollectionSelect('default-collection', created.key);
+              document.getElementById('btn-save-default').disabled = false;
+              persistDefaultCollection(created.key, created.name || name);
+            })
+            .getCollections();
+        })
+        .withFailureHandler(function (e) {
+          if (btn) btn.disabled = false;
+          setStatus(formatScriptError(e), true);
+        })
+        .createCollection(name);
     }
 
     function saveManualCollection() {

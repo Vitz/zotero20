@@ -5,16 +5,25 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.1.5';
+const ADDON_VERSION = '2.1.6';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
 const PROP_BIBLIOGRAPHY_CITED_ONLY = 'ZOTERO20_BIBLIOGRAPHY_CITED_ONLY';
+const PROP_BIBLIOGRAPHY_FONT = 'ZOTERO20_BIBLIOGRAPHY_FONT';
+const PROP_BIBLIOGRAPHY_FONT_SIZE = 'ZOTERO20_BIBLIOGRAPHY_FONT_SIZE';
 const PROP_CITATION_INSERT_MODE = 'ZOTERO20_CITATION_INSERT_MODE';
 const PROP_CITATION_LOCALE = 'ZOTERO20_CITATION_LOCALE';
 const PROP_DEBUG = 'ZOTERO20_DEBUG';
 const NAMED_RANGE_BIBLIOGRAPHY = 'ZOTERO20_BIBLIOGRAPHY';
 const BIBLIOGRAPHY_HEADING = 'Bibliografia';
+const BIBLIOGRAPHY_ALLOWED_FONTS = {
+  Arial: true,
+  'Times New Roman': true,
+  Calibri: true,
+  Georgia: true,
+};
+const BIBLIOGRAPHY_ALLOWED_FONT_SIZES = { 9: true, 10: true, 11: true, 12: true, 14: true };
 
 /**
  * Kotwica cytowania = ukryty link na tekście cytowania.
@@ -50,6 +59,19 @@ function showSidebar() {
 
 function getCollections() {
   return apiGet('/collections');
+}
+
+/** Tworzy nową kolekcję w bibliotece Zotero (Web lub Local API przez serwer). */
+function createCollection(name) {
+  name = String(name || '').trim();
+  if (!name) {
+    throw new Error('Podaj nazwę nowej kolekcji.');
+  }
+  var data = apiPost('/collections', { name: name });
+  if (!data || !data.key) {
+    throw new Error('Serwer nie zwrócił klucza nowej kolekcji.');
+  }
+  return { key: data.key, name: data.name || name, source: data.source || '' };
 }
 
 function getStudies() {
@@ -361,6 +383,42 @@ function saveBibliographyCitedOnly(enabled) {
   return getBibliographyCitedOnly();
 }
 
+/** Czcionka bibliografii — pusta = domyślna dokumentu. */
+function getBibliographyFont() {
+  var saved = PropertiesService.getDocumentProperties().getProperty(PROP_BIBLIOGRAPHY_FONT);
+  saved = String(saved || '').trim();
+  return BIBLIOGRAPHY_ALLOWED_FONTS[saved] ? saved : '';
+}
+
+function saveBibliographyFont(fontFamily) {
+  fontFamily = String(fontFamily || '').trim();
+  if (fontFamily && !BIBLIOGRAPHY_ALLOWED_FONTS[fontFamily]) {
+    throw new Error('Nieobsługiwana czcionka bibliografii.');
+  }
+  PropertiesService.getDocumentProperties().setProperty(PROP_BIBLIOGRAPHY_FONT, fontFamily);
+  return getBibliographyFont();
+}
+
+/** Rozmiar czcionki bibliografii w pt — 0/puste = bez wymuszania. */
+function getBibliographyFontSize() {
+  var raw = PropertiesService.getDocumentProperties().getProperty(PROP_BIBLIOGRAPHY_FONT_SIZE);
+  var size = parseInt(String(raw || '').trim(), 10);
+  return BIBLIOGRAPHY_ALLOWED_FONT_SIZES[size] ? size : 0;
+}
+
+function saveBibliographyFontSize(size) {
+  if (size === null || size === undefined || size === '') {
+    PropertiesService.getDocumentProperties().setProperty(PROP_BIBLIOGRAPHY_FONT_SIZE, '');
+    return getBibliographyFontSize();
+  }
+  var n = parseInt(String(size).trim(), 10);
+  if (!BIBLIOGRAPHY_ALLOWED_FONT_SIZES[n]) {
+    throw new Error('Rozmiar czcionki bibliografii: wybierz 9, 10, 11, 12 lub 14 pt.');
+  }
+  PropertiesService.getDocumentProperties().setProperty(PROP_BIBLIOGRAPHY_FONT_SIZE, String(n));
+  return getBibliographyFontSize();
+}
+
 /**
  * Zmiana stylu w jednym kroku: przelicza wszystkie cytowania w tekście
  * i bibliografię z tej samej odpowiedzi serwera, więc numeracja i format
@@ -602,6 +660,7 @@ function writeBibliographyToDocument_(entries, styleLabel, mustExist) {
   if (section) {
     removeBibliographyNamedRanges_(doc);
     var startIdx = updateBibliographyInPlace_(body, section.startIdx, section.endIdx, entries);
+    applyBibliographyAppearance_(body, startIdx, entries.length);
     attachBibliographyNamedRange_(doc, body, startIdx, entries.length);
     return {
       inserted: false,
@@ -618,6 +677,7 @@ function writeBibliographyToDocument_(entries, styleLabel, mustExist) {
     body.appendParagraph(String(entries[i]));
   }
 
+  applyBibliographyAppearance_(body, startIdx, entries.length);
   attachBibliographyNamedRange_(doc, body, startIdx, entries.length);
 
   return {
@@ -626,6 +686,36 @@ function writeBibliographyToDocument_(entries, styleLabel, mustExist) {
     item_count: entries.length,
     style_label: styleLabel,
   };
+}
+
+/**
+ * Nakłada czcionkę i rozmiar z Document Properties na nagłówek + wpisy bibliografii.
+ * Puste ustawienia = bez zmian (domyślne style dokumentu / nagłówka).
+ */
+function applyBibliographyAppearance_(body, startIdx, entryCount) {
+  var font = getBibliographyFont();
+  var size = getBibliographyFontSize();
+  if (!font && !size) {
+    return;
+  }
+  var endIdx = startIdx + entryCount;
+  for (var i = startIdx; i <= endIdx && i < body.getNumChildren(); i++) {
+    var child = body.getChild(i);
+    if (child.getType() !== DocumentApp.ElementType.PARAGRAPH) {
+      continue;
+    }
+    var te = child.asParagraph().editAsText();
+    var len = te.getText().length;
+    if (len < 1) {
+      continue;
+    }
+    if (font) {
+      te.setFontFamily(0, len - 1, font);
+    }
+    if (size) {
+      te.setFontSize(0, len - 1, size);
+    }
+  }
 }
 
 function attachBibliographyNamedRange_(doc, body, startIdx, entryCount) {

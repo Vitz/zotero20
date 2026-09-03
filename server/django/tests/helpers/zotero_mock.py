@@ -267,6 +267,22 @@ def register_doi_search_found(
     )
 
 
+def register_create_collection(
+    rsps: responses.RequestsMock,
+    new_key: str = "NEWCOLL1",
+    base_url: str = DEFAULT_BASE,
+) -> None:
+    rsps.add(
+        responses.POST,
+        f"{base_url}/api/users/0/collections",
+        json={
+            "successful": {"0": {"key": new_key, "version": 1}},
+            "failed": {},
+        },
+        status=200,
+    )
+
+
 def register_add_item_by_id(
     rsps: responses.RequestsMock,
     new_key: str = "NEWITEM1",
@@ -382,6 +398,15 @@ def register_web_api(
         f"{base}/users/{user_id}/items",
         json={
             "successful": {"0": {"key": "WEBNEW01", "version": 1}},
+            "failed": {},
+        },
+        status=200,
+    )
+    rsps.add(
+        responses.POST,
+        f"{base}/users/{user_id}/collections",
+        json={
+            "successful": {"0": {"key": "WEBCOLL1", "version": 1}},
             "failed": {},
         },
         status=200,

@@ -256,6 +256,8 @@ def health_zotero(request):
 
 @json_api
 def collections_list(request):
+    if request.method == "POST":
+        return _collections_create(request)
     if request.method != "GET":
         return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
 
@@ -271,6 +273,28 @@ def collections_list(request):
     if payload.get("hint"):
         response["hint"] = payload["hint"]
     return JsonResponse(response)
+
+
+def _collections_create(request):
+    body = parse_json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Nieprawidłowy JSON."}, status=400)
+
+    name = str(body.get("name") or "").strip()
+    if not name:
+        return JsonResponse({"error": "Wymagane pole: name (nazwa kolekcji)."}, status=400)
+
+    client, source = get_zotero_client()
+    try:
+        created = client.create_collection(name)
+    except ZoteroClientError as exc:
+        status = 400 if exc.status_code == 400 else 502
+        return JsonResponse({"error": str(exc)}, status=status)
+
+    return JsonResponse(
+        {"key": created["key"], "name": created.get("name") or name, "source": source},
+        status=201,
+    )
 
 
 @json_api

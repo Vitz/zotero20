@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.0.8';
+const ADDON_VERSION = '2.0.9';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -657,14 +657,6 @@ function insertCitationForItem(itemKey, identifiers, mode) {
   var key = normalizeItemKey_(itemKey);
   if (!key) {
     throw new Error('Brak klucza pozycji — zaimportuj DOI ponownie lub wybierz pozycję z listy.');
-  }
-
-  var citedKeys = uniqueItemKeys_(getTrackedCitations_());
-  if (citedKeys.indexOf(key) >= 0) {
-    throw new Error(
-      'Ta pozycja jest już cytowana w dokumencie (klucz ' + key + '). ' +
-      'Usuń istniejące cytowanie, jeśli chcesz wstawić je ponownie.'
-    );
   }
 
   var style = getBibliographyStyle();

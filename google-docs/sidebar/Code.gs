@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.1.3';
+const ADDON_VERSION = '2.1.4';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -387,7 +387,12 @@ function applyCitationStyle(styleId, options) {
   }
 
   var data = fetchDocumentCitations_(citations, style);
-  var updated = rewriteCitationRuns_(citations, data.citation_by_key, data.title_by_key);
+  var updated = rewriteCitationRuns_(
+    citations,
+    data.citation_by_key,
+    data.title_by_key,
+    !!data.numeric
+  );
 
   var bibliography = null;
   var bibliographyError = '';
@@ -417,6 +422,7 @@ function applyCitationStyle(styleId, options) {
     updated: updated.updated,
     unchanged: updated.unchanged,
     skipped: updated.skipped,
+    collapsed: updated.collapsed || 0,
     missing_item_keys: data.missing_item_keys,
     bibliography: bibliography,
     bibliography_error: bibliographyError,
@@ -1176,13 +1182,117 @@ function citationRunText_(textElement, start, end) {
 }
 
 /**
+ * Sąsiednie kotwice (nic / spacje / przecinki / myślniki między nimi) traktujemy
+ * jako jedną grupę — przy stylach numerycznych składamy je do [1,2], przy innych
+ * rozbijamy z powrotem na osobne cytowania obok siebie.
+ */
+function groupAdjacentCitationRuns_(runs) {
+  var groups = [];
+  var current = null;
+  for (var i = 0; i < runs.length; i++) {
+    var run = runs[i];
+    if (!current) {
+      current = [run];
+      continue;
+    }
+    var prev = current[current.length - 1];
+    if (citationRunsAreAdjacent_(prev, run)) {
+      current.push(run);
+    } else {
+      groups.push(current);
+      current = [run];
+    }
+  }
+  if (current) {
+    groups.push(current);
+  }
+  return groups;
+}
+
+function citationRunsAreAdjacent_(a, b) {
+  if (!a || !b || a.textElement !== b.textElement) {
+    return false;
+  }
+  if (b.start <= a.end) {
+    return false;
+  }
+  var gap = a.textElement.getText().substring(a.end + 1, b.start);
+  return /^[\s,]*$/.test(gap) || /^[\s]*[-–—][\s]*$/.test(gap);
+}
+
+/** Dla formy [1,2] (linki tylko na cyfrach) rozszerza zakres o zewnętrzne nawiasy. */
+function citationGroupReplaceBounds_(group) {
+  var te = group[0].textElement;
+  var text = te.getText();
+  var start = group[0].start;
+  var end = group[group.length - 1].end;
+  var allDigits = true;
+  for (var i = 0; i < group.length; i++) {
+    var slice = text.substring(group[i].start, group[i].end + 1);
+    if (!/^\d+$/.test(slice)) {
+      allDigits = false;
+      break;
+    }
+  }
+  if (
+    allDigits &&
+    start > 0 &&
+    text.charAt(start - 1) === '[' &&
+    end + 1 < text.length &&
+    text.charAt(end + 1) === ']'
+  ) {
+    start -= 1;
+    end += 1;
+  }
+  return { textElement: te, start: start, end: end };
+}
+
+function extractNumericCitationNumber_(text) {
+  var match = /^\[(\d+)\]$/.exec(String(text || '').trim());
+  return match ? parseInt(match[1], 10) : null;
+}
+
+function buildCitationGroupMembers_(group, citationByKey, titleByKey) {
+  var members = [];
+  var seen = {};
+  for (var i = 0; i < group.length; i++) {
+    var itemKey = normalizeItemKey_(group[i].item_key);
+    var newText = citationByKey[itemKey];
+    if (!itemKey || !newText) {
+      continue;
+    }
+    if (seen[itemKey]) {
+      continue;
+    }
+    seen[itemKey] = true;
+    members.push({
+      itemKey: itemKey,
+      citationId: group[i].citation_id,
+      citationText: newText,
+      hoverTitle: citationHoverTitle_(
+        newText,
+        titleByKey[itemKey] || '',
+        group[i].display_title || ''
+      ),
+      number: extractNumericCitationNumber_(newText),
+    });
+  }
+  return members;
+}
+
+/**
  * Podmienia tekst cytowań na nowy. Idzie od końca dokumentu, bo każda zmiana
  * długości tekstu przesuwa offsety kolejnych cytowań w tym samym akapicie.
+ *
+ * Przy numeric=true sąsiednie [1][2] składane są do [1,2] z osobnymi linkami
+ * na cyfrach (nawiasy i przecinki bez kotwicy). Zakresów [1-3] nie robimy —
+ * środkowa pozycja zniknęłaby z dokumentu i skaner by ją zgubił.
  */
-function rewriteCitationRuns_(runs, citationByKey, titleByKey) {
+function rewriteCitationRuns_(runs, citationByKey, titleByKey, numeric) {
   var updated = 0;
   var unchanged = 0;
   var skipped = 0;
+  var collapsed = 0;
   var normalizedMap = {};
   var normalizedTitles = {};
   Object.keys(citationByKey || {}).forEach(function (k) {
@@ -1192,38 +1302,164 @@ function rewriteCitationRuns_(runs, citationByKey, titleByKey) {
     normalizedTitles[normalizeItemKey_(k)] = titleByKey[k];
   });
 
-  for (var i = runs.length - 1; i >= 0; i--) {
-    var run = runs[i];
-    var itemKey = normalizeItemKey_(run.item_key);
-    var newText = normalizedMap[itemKey];
-    if (!newText) {
-      skipped++;
+  var groups = groupAdjacentCitationRuns_(runs);
+  for (var g = groups.length - 1; g >= 0; g--) {
+    var group = groups[g];
+    var members = buildCitationGroupMembers_(group, normalizedMap, normalizedTitles);
+    if (!members.length) {
+      skipped += group.length;
       continue;
     }
 
-    var hoverTitle = citationHoverTitle_(
-      newText,
-      normalizedTitles[itemKey] || '',
-      run.display_title || ''
-    );
-    var currentText = citationRunText_(run.textElement, run.start, run.end);
-    if (currentText !== newText) {
-      run.textElement.deleteText(run.start, run.end);
-      run.textElement.insertText(run.start, newText);
-      run.end = run.start + newText.length - 1;
-      applyCitationLink_(run.textElement, run.start, run.end, itemKey, run.citation_id, hoverTitle);
-      updated++;
-      continue;
+    var result;
+    if (numeric && members.length > 1 && members.every(function (m) { return m.number !== null; })) {
+      result = writeCollapsedNumericCitationGroup_(group, members);
+      if (result.collapsed) {
+        collapsed++;
+      }
+    } else if (numeric && members.length === 1 && members[0].number !== null) {
+      result = writeSingleCitationRun_(group, members[0]);
+    } else {
+      result = writeExpandedCitationGroup_(group, members);
     }
 
-    var nextUrl = buildCitationUrl_(itemKey, run.citation_id, hoverTitle);
-    if (nextUrl !== run.url) {
-      applyCitationLink_(run.textElement, run.start, run.end, itemKey, run.citation_id, hoverTitle);
-    }
-    unchanged++;
+    updated += result.updated || 0;
+    unchanged += result.unchanged || 0;
+    skipped += result.skipped || 0;
   }
 
-  return { updated: updated, unchanged: unchanged, skipped: skipped };
+  return {
+    updated: updated,
+    unchanged: unchanged,
+    skipped: skipped,
+    collapsed: collapsed,
+  };
+}
+
+function writeSingleCitationRun_(group, member) {
+  var bounds = citationGroupReplaceBounds_(group);
+  var te = bounds.textElement;
+  var newText = member.citationText;
+  var currentText = te.getText().substring(bounds.start, bounds.end + 1);
+  if (currentText !== newText) {
+    te.deleteText(bounds.start, bounds.end);
+    te.insertText(bounds.start, newText);
+    applyCitationLink_(
+      te,
+      bounds.start,
+      bounds.start + newText.length - 1,
+      member.itemKey,
+      member.citationId,
+      member.hoverTitle
+    );
+    return { updated: 1 };
+  }
+  var nextUrl = buildCitationUrl_(member.itemKey, member.citationId, member.hoverTitle);
+  var url = linkUrlAtOffset_(te, bounds.start, bounds.end);
+  if (nextUrl !== url) {
+    applyCitationLink_(
+      te,
+      bounds.start,
+      bounds.end,
+      member.itemKey,
+      member.citationId,
+      member.hoverTitle
+    );
+  }
+  return { unchanged: 1 };
+}
+
+/** Osobne pełne cytowania obok siebie — styl autor–rok albo pojedyncze numery. */
+function writeExpandedCitationGroup_(group, members) {
+  var bounds = citationGroupReplaceBounds_(group);
+  var te = bounds.textElement;
+  var built = '';
+  var spans = [];
+  for (var i = 0; i < members.length; i++) {
+    var start = built.length;
+    built += members[i].citationText;
+    spans.push({
+      start: start,
+      end: built.length - 1,
+      member: members[i],
+    });
+  }
+  var currentText = te.getText().substring(bounds.start, bounds.end + 1);
+  if (currentText === built) {
+    for (var u = 0; u < spans.length; u++) {
+      applyCitationLink_(
+        te,
+        bounds.start + spans[u].start,
+        bounds.start + spans[u].end,
+        spans[u].member.itemKey,
+        spans[u].member.citationId,
+        spans[u].member.hoverTitle
+      );
+    }
+    return { unchanged: members.length };
+  }
+  te.deleteText(bounds.start, bounds.end);
+  te.insertText(bounds.start, built);
+  te.setLinkUrl(bounds.start, bounds.start + built.length - 1, null);
+  for (var s = 0; s < spans.length; s++) {
+    applyCitationLink_(
+      te,
+      bounds.start + spans[s].start,
+      bounds.start + spans[s].end,
+      spans[s].member.itemKey,
+      spans[s].member.citationId,
+      spans[s].member.hoverTitle
+    );
+  }
+  return { updated: members.length };
+}
+
+/**
+ * [1][2] / [1], [2] / wcześniej złożone [1,2] → jeden napis [1,2]
+ * z kotwicami tylko na cyfrach (opcja d).
+ */
+function writeCollapsedNumericCitationGroup_(group, members) {
+  members = members.slice().sort(function (a, b) {
+    return a.number - b.number;
+  });
+  var built = '[';
+  var spans = [];
+  for (var i = 0; i < members.length; i++) {
+    if (i > 0) {
+      built += ',';
+    }
+    var numStr = String(members[i].number);
+    spans.push({
+      start: built.length,
+      end: built.length + numStr.length - 1,
+      member: members[i],
+    });
+    built += numStr;
+  }
+  built += ']';
+
+  var bounds = citationGroupReplaceBounds_(group);
+  var te = bounds.textElement;
+  var currentText = te.getText().substring(bounds.start, bounds.end + 1);
+  var textChanged = currentText !== built;
+  if (textChanged) {
+    te.deleteText(bounds.start, bounds.end);
+    te.insertText(bounds.start, built);
+  }
+  te.setLinkUrl(bounds.start, bounds.start + built.length - 1, null);
+  for (var s = 0; s < spans.length; s++) {
+    applyCitationLink_(
+      te,
+      bounds.start + spans[s].start,
+      bounds.start + spans[s].end,
+      spans[s].member.itemKey,
+      spans[s].member.citationId,
+      spans[s].member.hoverTitle
+    );
+  }
+  return textChanged
+    ? { updated: members.length, collapsed: true }
+    : { unchanged: members.length, collapsed: true };
 }
 
 /** Jednorazowo przenosi cytowania z NamedRange (wersja 1.x) na kotwice-linki. */

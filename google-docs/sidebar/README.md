@@ -1,7 +1,7 @@
 # Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
-Wersja plików Apps Script: **2.1.3** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+Wersja plików Apps Script: **2.1.4** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
 
 ## Co robi panel
 
@@ -34,10 +34,18 @@ Dla IEEE i Vancouver numery `[1]`, `[2]` nadaje serwer według kolejności cytow
 a bibliografia jest w tej samej kolejności. Style autor–rok (APA, Chicago, Harvard, MLA)
 dostają bibliografię posortowaną alfabetycznie.
 
+Sąsiednie cytowania numeryczne (`[1][2]` albo `[1] [2]`, bez innego tekstu między nimi) są
+po odświeżeniu stylu składane do `[1,2]` — jak w Zotero przy wielu pozycjach w jednym polu.
+Kotwice zostają na samych cyfrach (nawiasy i przecinek bez linku), więc skaner nadal widzi
+każdą pozycję osobno. **Nie** składamy zakresów `[1-3]`: środkowy numer zniknąłby z tekstu
+i stracilibyśmy kotwicę. Przy zmianie na styl autor–rok grupa wraca do osobnych cytowań
+obok siebie.
+
 ### Czego to nadal nie robi
 
 To **nie** są field codes Zotero. Bez Connectora nie ma: `ibid.`, skracania powtórzonych cytowań,
-grup cytowań w jednym nawiasie, lokatorów (strony), klikalnego linku cytat → wpis bibliografii.
+lokatorów (strony), klikalnego linku cytat → wpis bibliografii, ani pełnego multi-cite z dialogu
+(„dodaj kilka pozycji naraz” — tu składa się tylko to, co już stoi obok siebie w dokumencie).
 Apps Script nie ma API do pól dokumentu — kotwica-link to najbliższy możliwy odpowiednik.
 
 ## Instalacja bez clasp (kopiowanie ręczne)

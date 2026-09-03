@@ -6,6 +6,9 @@
     "title": "Test Article About Nature",
     "DOI": "10.1038/nature12373",
     "date": "2013-08-14",
+    "publicationTitle": "Nature",
+    "journalAbbreviation": "Nature",
+    "abstractNote": "An abstract about nature and testing.",
     "creators": [
       {
         "creatorType": "author",

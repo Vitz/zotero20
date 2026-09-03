@@ -439,7 +439,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.1.1';
+    var SIDEBAR_VERSION = '2.1.2';
 
     // UrlFetchApp ma limity dzienne — 3 s to kompromis vs prośba o 1 s.
     // Przy długim otwarciu sidebara rozważ później 5 s w ustawieniach.
@@ -451,7 +451,7 @@
       zotero: null,
     };
 
-    var lastImport = { doi: '', orcid: '', itemKey: '', citationText: '', identifiers: null };
+    var lastImport = { doi: '', orcid: '', itemKey: '', citationText: '', hoverTitle: '', identifiers: null };
     var duplicateItem = null;
     var appState = {
       collections: [],
@@ -699,6 +699,7 @@
         doi: r.doi || '',
         title: r.title || '',
         citationText: r.citation_text || '',
+        hoverTitle: r.title || r.citation_text || '',
       };
       var text = r.title ? r.title : ('DOI: ' + r.doi);
       document.getElementById('duplicate-offer-text').textContent =
@@ -714,7 +715,8 @@
       pasteItemCitation(
         duplicateItem.itemKey,
         { type: 'doi', value: duplicateItem.doi },
-        duplicateItem.citationText
+        duplicateItem.citationText,
+        duplicateItem.hoverTitle
       );
     }
 
@@ -725,6 +727,7 @@
         orcid: extra.orcid || '',
         itemKey: itemKey || '',
         citationText: extra.citationText || '',
+        hoverTitle: extra.hoverTitle || extra.citationText || '',
         identifiers: extra.identifiers || (doi ? { type: 'doi', value: doi } : null),
       };
       var summary = '';
@@ -743,10 +746,10 @@
         showPasteFeedback('Brak pozycji do wklejenia — najpierw zaimportuj DOI.', true);
         return;
       }
-      pasteItemCitation(lastImport.itemKey, lastImport.identifiers, lastImport.citationText);
+      pasteItemCitation(lastImport.itemKey, lastImport.identifiers, lastImport.citationText, lastImport.hoverTitle);
     }
 
-    function pasteItemCitation(itemKey, identifiers, knownCitationText) {
+    function pasteItemCitation(itemKey, identifiers, knownCitationText, hoverTitle) {
       itemKey = String(itemKey || '').trim();
       if (!itemKey) {
         showPasteFeedback('Brak klucza pozycji — zaimportuj DOI ponownie lub wybierz pozycję z listy.', true);
@@ -759,6 +762,11 @@
           : 'Wstawiam cytowanie w miejscu kursora…',
         false
       );
+      var ids = {};
+      var src = identifiers || {};
+      Object.keys(src).forEach(function (k) { ids[k] = src[k]; });
+      var hint = hoverTitle || src.hoverTitle || '';
+      if (hint) ids.hoverTitle = hint;
       google.script.run
         .withSuccessHandler(function (r) {
           setPasteButtonsDisabled(false);
@@ -781,7 +789,27 @@
           setPasteButtonsDisabled(false);
           showPasteFeedback(formatScriptError(e), true);
         })
-        .insertCitationForItem(itemKey, identifiers || {}, appState.insertMode);
+        .insertCitationForItem(itemKey, ids, appState.insertMode);
+    }
+
+    function formatCiteHoverTitle(item) {
+      item = item || {};
+      var creators = item.creators || [];
+      var n = Array.isArray(creators) ? creators.length : 0;
+      var family = '';
+      if (n) {
+        var c = creators[0];
+        family = typeof c === 'string'
+          ? c
+          : String((c && (c.lastName || c.last_name || c.name)) || '').trim();
+      }
+      var year = formatItemDate(item.date);
+      if (family && year) {
+        return family + (n > 1 ? ' et al.' : '') + ', ' + year;
+      }
+      var title = String(item.title || '').trim();
+      if (title) return title;
+      return String(item.citation_text || '').replace(/^\(|\)$/g, '').trim();
     }
 
     function truncateTitle(title, max) {
@@ -930,7 +958,7 @@
           return function () {
             var key = it.key || it.item_key || '';
             var ids = it.doi ? { type: 'doi', value: it.doi } : {};
-            pasteItemCitation(key, ids, it.citation_text);
+            pasteItemCitation(key, ids, it.citation_text, formatCiteHoverTitle(it));
           };
         })(item);
 
@@ -1816,6 +1844,7 @@
             showDuplicateOffer(r);
             showPostImport(r.doi, r.item_key, label, {
               citationText: r.citation_text || '',
+              hoverTitle: r.title || r.citation_text || '',
               identifiers: { type: 'doi', value: r.doi },
             });
             loadStudyOverview();
@@ -1845,6 +1874,7 @@
       setStatus(msg, !!r.placeholder_error);
       showPostImport(r.doi, itemKey, label, {
         citationText: r.citation_text || '',
+        hoverTitle: r.title || r.citation_text || '',
         placeholderReplaced: r.placeholder_replaced,
         placeholderError: r.placeholder_error,
         identifiers: { type: 'doi', value: r.doi },

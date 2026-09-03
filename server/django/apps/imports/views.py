@@ -1,6 +1,8 @@
 import os
 
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import render
+from django.views.decorators.http import require_GET
 
 from apps.imports.middleware import json_api, normalize_doi, normalize_orcid, parse_json_body
 from .services.bibliography import (
@@ -9,6 +11,7 @@ from .services.bibliography import (
     export_collection_bibliography,
     export_items_bibliography,
     list_styles,
+    resolve_locale,
     resolve_style_id,
     style_label,
 )
@@ -20,8 +23,106 @@ from .services.debug_trace import (
     dedupe_collection_items_by_doi,
     trace_item_citation,
 )
+from .services.cite_public import CACHE_CONTROL, get_public_cite_item, is_valid_item_key
 from .services.zotero import ZoteroClient, get_zotero_client
 from .services.zotero_web import web_api_configured
+
+
+def _wants_json(request) -> bool:
+    if (request.GET.get("format") or "").strip().lower() == "json":
+        return True
+    accept = (request.headers.get("Accept") or "").lower()
+    return "application/json" in accept and "text/html" not in accept
+
+
+def _og_description(item: dict) -> str:
+    parts = [item.get("authors") or "", item.get("year") or "", item.get("journal") or ""]
+    text = " · ".join(part for part in parts if part)
+    abstract = (item.get("abstract") or "").strip()
+    if abstract:
+        snippet = abstract.replace("\n", " ").strip()
+        if len(snippet) > 180:
+            snippet = snippet[:180].rsplit(" ", 1)[0] + "…"
+        text = f"{text} — {snippet}" if text else snippet
+    return text or (item.get("title") or item.get("item_key") or "")
+
+
+def _cite_json(payload: dict, status: int = 200, cache: str = CACHE_CONTROL):
+    response = JsonResponse(payload, status=status)
+    response["Cache-Control"] = cache
+    return response
+
+
+def _cite_html(request, template: str, context: dict, status: int = 200, cache: str = CACHE_CONTROL):
+    response = render(request, template, context, status=status)
+    response["Cache-Control"] = cache
+    return response
+
+
+@require_GET
+def cite_item(request, item_key: str):
+    """Public citation landing page (no API key). Query c= and t= are ignored."""
+    key = (item_key or "").strip()
+    wants_json = _wants_json(request)
+    if not is_valid_item_key(key):
+        if wants_json:
+            return _cite_json(
+                {"error": "Nie znaleziono pozycji.", "item_key": key},
+                status=404,
+                cache="public, max-age=10",
+            )
+        return _cite_html(
+            request,
+            "imports/cite_item_404.html",
+            {"item_key": key or "—"},
+            status=404,
+            cache="public, max-age=10",
+        )
+
+    try:
+        item = get_public_cite_item(key)
+    except ZoteroClientError as exc:
+        if wants_json:
+            return _cite_json({"error": str(exc), "item_key": key}, status=502, cache="no-store")
+        response = HttpResponse(
+            "<!DOCTYPE html><html lang='pl'><head><meta charset='utf-8'>"
+            "<title>Błąd / Error</title></head><body>"
+            "<h1>Nie udało się pobrać pozycji / Failed to load item</h1>"
+            "</body></html>",
+            status=502,
+            content_type="text/html; charset=utf-8",
+        )
+        response["Cache-Control"] = "no-store"
+        return response
+
+    if not item:
+        if wants_json:
+            return _cite_json(
+                {"error": "Nie znaleziono pozycji.", "item_key": key},
+                status=404,
+                cache="public, max-age=10",
+            )
+        return _cite_html(
+            request,
+            "imports/cite_item_404.html",
+            {"item_key": key},
+            status=404,
+            cache="public, max-age=10",
+        )
+
+    if wants_json:
+        return _cite_json(item)
+
+    canonical = request.build_absolute_uri(request.path)
+    return _cite_html(
+        request,
+        "imports/cite_item.html",
+        {
+            "item": item,
+            "canonical_url": canonical,
+            "og_description": _og_description(item),
+        },
+    )
 
 
 _COLLECTIONS_EMPTY_HINT_LOCAL = (
@@ -437,6 +538,13 @@ def _parse_item_keys(raw_item_keys):
     return item_keys, None
 
 
+def _resolve_locale_or_error(raw):
+    try:
+        return resolve_locale(raw), None
+    except ValueError as exc:
+        return None, JsonResponse({"error": str(exc)}, status=400)
+
+
 @json_api
 def citations_generate(request):
     """Cytowania w tekście + bibliografia dla pozycji cytowanych w dokumencie (jeden styl)."""
@@ -452,13 +560,17 @@ def citations_generate(request):
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
+    locale, locale_error = _resolve_locale_or_error(body.get("locale"))
+    if locale_error is not None:
+        return locale_error
+
     item_keys, error = _parse_item_keys(body.get("item_keys"))
     if error is not None:
         return error
 
     client, source = get_zotero_client()
     try:
-        payload = build_document_citations(client, source, item_keys, style)
+        payload = build_document_citations(client, source, item_keys, style, locale)
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     except ZoteroClientError as exc:
@@ -480,6 +592,10 @@ def bibliography_generate(request):
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
+    locale, locale_error = _resolve_locale_or_error(body.get("locale"))
+    if locale_error is not None:
+        return locale_error
+
     raw_item_keys = body.get("item_keys")
     if raw_item_keys is not None:
         item_keys, error = _parse_item_keys(raw_item_keys)
@@ -487,7 +603,7 @@ def bibliography_generate(request):
             return error
         client, source = get_zotero_client()
         try:
-            payload = export_items_bibliography(client, source, item_keys, style)
+            payload = export_items_bibliography(client, source, item_keys, style, locale)
         except ValueError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
         except ZoteroClientError as exc:
@@ -503,7 +619,9 @@ def bibliography_generate(request):
 
     client, source = get_zotero_client()
     try:
-        payload = export_collection_bibliography(client, source, collection_key, style)
+        payload = export_collection_bibliography(
+            client, source, collection_key, style, locale
+        )
     except ZoteroClientError as exc:
         return JsonResponse({"error": str(exc)}, status=502)
 
@@ -523,8 +641,11 @@ def item_detail(request, item_key):
             resolved_style = resolve_style_id(style)
         except ValueError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
+        locale, locale_error = _resolve_locale_or_error(request.GET.get("locale"))
+        if locale_error is not None:
+            return locale_error
         try:
-            citation_text = client.fetch_item_citation(item_key, resolved_style)
+            citation_text = client.fetch_item_citation(item_key, resolved_style, locale)
         except ZoteroClientError as exc:
             return JsonResponse({"error": str(exc)}, status=502)
         return JsonResponse(
@@ -533,6 +654,7 @@ def item_detail(request, item_key):
                 "item_key": item_key,
                 "style": resolved_style,
                 "style_label": style_label(resolved_style),
+                "locale": locale,
                 "citation_text": citation_text,
             }
         )
@@ -564,6 +686,9 @@ def debug_item(request, item_key):
         return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
 
     style = (request.GET.get("style") or "").strip()
+    locale, locale_error = _resolve_locale_or_error(request.GET.get("locale"))
+    if locale_error is not None:
+        return locale_error
     client, source = get_zotero_client()
     try:
         item = client.get_item(item_key)
@@ -573,12 +698,13 @@ def debug_item(request, item_key):
     if not item:
         return JsonResponse({"error": "Nie znaleziono pozycji."}, status=404)
 
-    citation_trace = trace_item_citation(client, item_key, style or None)
+    citation_trace = trace_item_citation(client, item_key, style or None, locale)
     payload = {
         "source": source,
         "item_key": item_key,
         "item": item,
         "doi": item.get("doi", ""),
+        "locale": locale,
         "citation_trace": citation_trace,
     }
     if style:
@@ -605,13 +731,17 @@ def debug_citations(request):
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
+    locale, locale_error = _resolve_locale_or_error(body.get("locale"))
+    if locale_error is not None:
+        return locale_error
+
     item_keys, error = _parse_item_keys(body.get("item_keys"))
     if error is not None:
         return error
 
     client, source = get_zotero_client()
     try:
-        payload = build_document_citations_debug(client, source, item_keys, style)
+        payload = build_document_citations_debug(client, source, item_keys, style, locale)
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     except ZoteroClientError as exc:

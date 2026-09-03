@@ -29,6 +29,9 @@ fi
 
 VHOST=$(cat <<EOF
 ${DOMAIN} {
+	# Cały vhost → Django (:${PORT}), w tym /api/*, /app, /cite/*, /connector/*, /static.
+	# Osobne handle nie są potrzebne i nie wolno ich dodawać tak, by ominąć Django
+	# albo wciągnąć ruch docx2pdf (inne domeny w tym Caddyfile).
 	tls /etc/caddy/certs/origin.pem /etc/caddy/certs/origin-key.pem
 	encode zstd gzip
 	header {

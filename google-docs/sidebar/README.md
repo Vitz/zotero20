@@ -1,18 +1,24 @@
 # Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
-Wersja plików Apps Script: **2.1.1** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+Wersja plików Apps Script: **2.1.2** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
 
 ## Co robi panel
 
 **Import** — dodaje pozycje do biblioteki Zotero na serwerze (DOI / ORCID → kolekcja).
 
 **Śledzone cytowania w tekście** — wstawia cytowanie w miejscu kursora (albo zamiast `[*]`) i oznacza je
-ukrytą kotwicą-linkiem `https://zotero.keyweb.pl/cite/<ITEMKEY>?c=<id>`. Kotwica:
+ukrytą kotwicą-linkiem `https://zotero.keyweb.pl/cite/<ITEMKEY>?c=<id>&t=<tytuł>`.
+Kotwica:
 
 - przeżywa zamknięcie i ponowne otwarcie dokumentu,
 - przeżywa kopiowanie tekstu, cofanie zmian i zrobienie kopii pliku,
 - pozwala odnaleźć wszystkie cytowania skanowaniem dokumentu (bez rejestru w `DocumentProperties`).
+
+Google Docs na najechanie **zawsze pokazuje sam URL** (nie ma API na własny dymek). Dlatego w adresie
+jest parametr `t=` z krótkim tytułem (autor+rok albo skrócony tytuł pracy) — da się go odczytać z linku.
+Kliknięcie `[1]` otwiera publiczną kartę pracy (`GET /cite/<ITEMKEY>`), bez klucza API. Parametry `c=` i `t=`
+są ignorowane przy wyświetlaniu.
 
 **Bibliografia tylko z cytowanych pozycji** — budowana wyłącznie z kotwic znalezionych w dokumencie,
 w kolejności cytowania. Tryb „cała kolekcja” to osobny, domyślnie wyłączony przełącznik — panel

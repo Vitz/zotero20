@@ -22,6 +22,7 @@ Zotero celowo binduje tylko `127.0.0.1`. Projekt zotero20 używa reverse proxy (
   - `/connector/*` (fork Connectora, cytowania Docs)
   - `/api/v1/*` (import ORCID/DOI, sidebar GAS)
   - `/api/users/*`, `/api/plus/*` (Local API przez proxy)
+- **Bez klucza:** `/api/v1/health`, `/cite/<item_key>` (publiczna karta bibliograficzna: tytuł, autorzy, DOI — bez notatek i kolekcji).
 
 ### 2. Panel admin `/app/`
 

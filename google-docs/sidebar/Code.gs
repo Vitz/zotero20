@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.1.1';
+const ADDON_VERSION = '2.1.2';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -20,6 +20,11 @@ const BIBLIOGRAPHY_HEADING = 'Bibliografia';
  * W przeciwieństwie do NamedRange link przeżywa kopiuj/wklej, cofnięcie zmian,
  * zamknięcie dokumentu i zrobienie kopii pliku — to najbliższy odpowiednik
  * pól Zotero, jaki daje Apps Script.
+ *
+ * Google Docs na hover pokazuje wyłącznie URL (brak API na własny tooltip).
+ * Parametr t= niesie krótki tytuł (autor+rok albo skrócony tytuł pracy),
+ * żeby dało się go odczytać z dymka. Klik otwiera /cite/<ITEMKEY> (metadane).
+ * Skaner (parseCitationUrl_) czyta tylko ścieżkę /cite/<ITEMKEY> i parametr c=.
  */
 const CITE_LINK_BASE = 'https://zotero.keyweb.pl/cite/';
 
@@ -352,7 +357,7 @@ function applyCitationStyle(styleId, options) {
   }
 
   var data = fetchDocumentCitations_(citations, style);
-  var updated = rewriteCitationRuns_(citations, data.citation_by_key);
+  var updated = rewriteCitationRuns_(citations, data.citation_by_key, data.title_by_key);
 
   var bibliography = null;
   var bibliographyError = '';
@@ -501,17 +506,32 @@ function fetchDocumentCitations_(citations, style) {
   var keys = uniqueItemKeys_(citations);
   var data = apiPost('/citations', { style: style, item_keys: keys });
   var byKey = {};
+  var titleByKey = {};
   var list = data.citations || [];
+  var orderedKeys = (data.item_keys || keys).map(normalizeItemKey_);
+  var entries = normalizeEntries_(data.entries);
+  if (data.numeric) {
+    for (var e = 0; e < orderedKeys.length; e++) {
+      if (entries[e]) {
+        titleByKey[orderedKeys[e]] = stripLeadingBibNumber_(entries[e]);
+      }
+    }
+  }
   for (var i = 0; i < list.length; i++) {
     var text = String(list[i].citation_text || '').trim();
     var key = normalizeItemKey_(list[i].item_key);
     if (key && text) {
       byKey[key] = text;
     }
+    var fromCite = usefulHoverTitle_(text);
+    if (key && fromCite) {
+      titleByKey[key] = fromCite;
+    }
   }
   return {
     citation_by_key: byKey,
-    entries: normalizeEntries_(data.entries),
+    title_by_key: titleByKey,
+    entries: entries,
     style: data.style || style,
     style_label: data.style_label || style,
     numeric: !!data.numeric,
@@ -772,14 +792,16 @@ function insertCitationForItem(itemKey, identifiers, mode) {
   }
 
   mode = mode === 'placeholder' || mode === 'cursor' ? mode : getCitationInsertMode();
+  var hoverHint = identifiers && identifiers.hoverTitle;
+  var hoverTitle = citationHoverTitle_(citationText, '', hoverHint);
   var placeholderIds = identifiers || {};
   if (mode === 'placeholder') {
     placeholderIds = enrichIdentifiersForPlaceholder_(placeholderIds, key);
   }
   var placement =
     mode === 'placeholder'
-      ? replacePlaceholderInDocument_(citationText, placeholderIds, key)
-      : insertCitationAtCursor_(citationText, key);
+      ? replacePlaceholderInDocument_(citationText, placeholderIds, key, hoverTitle)
+      : insertCitationAtCursor_(citationText, key, hoverTitle);
 
   var result = {
     replaced: true,
@@ -820,7 +842,7 @@ function showPasteAlert(message, isError) {
  * Gdy podano itemKey, cytowanie dostaje kotwicę-link i jest dalej śledzone.
  * Kolejność: [*], potem [identyfikator] dopasowany do importu.
  */
-function replacePlaceholderInDocument_(text, identifiers, itemKey) {
+function replacePlaceholderInDocument_(text, identifiers, itemKey, hoverTitle) {
   identifiers = identifiers || {};
   var body = DocumentApp.getActiveDocument().getBody();
   var patterns = buildPlaceholderPatterns_(identifiers);
@@ -829,7 +851,14 @@ function replacePlaceholderInDocument_(text, identifiers, itemKey) {
     var result = replaceFirstLiteral_(body, patterns[i], text);
     if (result) {
       if (itemKey) {
-        applyCitationLink_(result.textElement, result.start, result.end, itemKey, newCitationId_());
+        applyCitationLink_(
+          result.textElement,
+          result.start,
+          result.end,
+          itemKey,
+          newCitationId_(),
+          hoverTitle
+        );
       }
       return { mode: 'placeholder', pattern: patterns[i], text: text, item_key: itemKey || '' };
     }
@@ -842,7 +871,7 @@ function replacePlaceholderInDocument_(text, identifiers, itemKey) {
 }
 
 /** Wstawia cytowanie tam, gdzie stoi kursor w dokumencie. */
-function insertCitationAtCursor_(text, itemKey) {
+function insertCitationAtCursor_(text, itemKey, hoverTitle) {
   var doc = DocumentApp.getActiveDocument();
   var cursor = doc.getCursor();
   if (!cursor) {
@@ -859,7 +888,14 @@ function insertCitationAtCursor_(text, itemKey) {
 
   var offset = cursor.getSurroundingTextOffset();
   textElement.insertText(offset, text);
-  applyCitationLink_(textElement, offset, offset + text.length - 1, itemKey, newCitationId_());
+  applyCitationLink_(
+    textElement,
+    offset,
+    offset + text.length - 1,
+    itemKey,
+    newCitationId_(),
+    hoverTitle
+  );
   return { mode: 'cursor', text: text, item_key: itemKey };
 }
 
@@ -867,17 +903,68 @@ function newCitationId_() {
   return Utilities.getUuid().replace(/-/g, '').substring(0, 12);
 }
 
-function buildCitationUrl_(itemKey, citationId) {
-  return (
+function buildCitationUrl_(itemKey, citationId, displayTitle) {
+  var url =
     CITE_LINK_BASE +
     encodeURIComponent(normalizeItemKey_(itemKey)) +
     '?c=' +
-    encodeURIComponent(citationId || newCitationId_())
-  );
+    encodeURIComponent(citationId || newCitationId_());
+  var title = sanitizeCiteTitle_(displayTitle);
+  if (title) {
+    url += '&t=' + encodeURIComponent(title);
+  }
+  return url;
 }
 
 function normalizeItemKey_(itemKey) {
   return String(itemKey || '').trim().toUpperCase();
+}
+
+function sanitizeCiteTitle_(raw) {
+  var text = String(raw || '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (text.length > 80) {
+    var cut = text.substring(0, 80);
+    var space = cut.lastIndexOf(' ');
+    text = (space >= 40 ? cut.substring(0, space) : cut).trim();
+  }
+  return text;
+}
+
+function stripLeadingBibNumber_(text) {
+  return String(text || '').replace(/^\s*\[\d+\]\s*/, '').trim();
+}
+
+function stripOuterParens_(text) {
+  var value = String(text || '').trim();
+  var wrapped = /^\((.*)\)$/.exec(value);
+  if (wrapped) {
+    return wrapped[1].trim();
+  }
+  return value;
+}
+
+function usefulHoverTitle_(raw) {
+  var original = String(raw || '').trim();
+  if (!original || /^\[\d+\]$/.test(original)) {
+    return '';
+  }
+  var text = sanitizeCiteTitle_(stripOuterParens_(stripLeadingBibNumber_(original)));
+  if (!text || /^\d+$/.test(text)) {
+    return '';
+  }
+  return text;
+}
+
+function citationHoverTitle_(citationText, bibEntry, existingTitle) {
+  return (
+    usefulHoverTitle_(citationText) ||
+    usefulHoverTitle_(bibEntry) ||
+    sanitizeCiteTitle_(existingTitle) ||
+    ''
+  );
 }
 
 function parseCitationUrl_(url) {
@@ -902,7 +989,16 @@ function parseCitationUrl_(url) {
   if (queryMatch) {
     citationId = queryMatch[1];
   }
-  return { itemKey: itemKey, citationId: citationId };
+  var displayTitle = '';
+  var titleMatch = /[?&]t=([^&#]*)/i.exec(String(url));
+  if (titleMatch && titleMatch[1]) {
+    try {
+      displayTitle = decodeURIComponent(String(titleMatch[1]).replace(/\+/g, ' '));
+    } catch (e) {
+      displayTitle = titleMatch[1];
+    }
+  }
+  return { itemKey: itemKey, citationId: citationId, displayTitle: displayTitle };
 }
 
 function linkUrlAtOffset_(textElement, start, end) {
@@ -921,11 +1017,11 @@ function linkUrlAtOffset_(textElement, start, end) {
  * Nakłada kotwicę cytowania i zdejmuje domyślny wygląd hiperłącza,
  * żeby cytowanie w tekście wyglądało jak zwykły tekst.
  */
-function applyCitationLink_(textElement, start, end, itemKey, citationId) {
+function applyCitationLink_(textElement, start, end, itemKey, citationId, displayTitle) {
   if (end < start) {
     return;
   }
-  textElement.setLinkUrl(start, end, buildCitationUrl_(itemKey, citationId));
+  textElement.setLinkUrl(start, end, buildCitationUrl_(itemKey, citationId, displayTitle));
   textElement.setUnderline(start, end, false);
   textElement.setForegroundColor(start, end, '#000000');
 }
@@ -1006,6 +1102,7 @@ function collectRunsFromText_(textElement, runs) {
       url: url,
       item_key: meta.itemKey,
       citation_id: meta.citationId,
+      display_title: meta.displayTitle || '',
     };
     runs.push(current);
   }
@@ -1035,13 +1132,17 @@ function citationRunText_(textElement, start, end) {
  * Podmienia tekst cytowań na nowy. Idzie od końca dokumentu, bo każda zmiana
  * długości tekstu przesuwa offsety kolejnych cytowań w tym samym akapicie.
  */
-function rewriteCitationRuns_(runs, citationByKey) {
+function rewriteCitationRuns_(runs, citationByKey, titleByKey) {
   var updated = 0;
   var unchanged = 0;
   var skipped = 0;
   var normalizedMap = {};
+  var normalizedTitles = {};
   Object.keys(citationByKey || {}).forEach(function (k) {
     normalizedMap[normalizeItemKey_(k)] = citationByKey[k];
+  });
+  Object.keys(titleByKey || {}).forEach(function (k) {
+    normalizedTitles[normalizeItemKey_(k)] = titleByKey[k];
   });
 
   for (var i = runs.length - 1; i >= 0; i--) {
@@ -1053,17 +1154,26 @@ function rewriteCitationRuns_(runs, citationByKey) {
       continue;
     }
 
+    var hoverTitle = citationHoverTitle_(
+      newText,
+      normalizedTitles[itemKey] || '',
+      run.display_title || ''
+    );
     var currentText = citationRunText_(run.textElement, run.start, run.end);
-    if (currentText === newText) {
-      unchanged++;
+    if (currentText !== newText) {
+      run.textElement.deleteText(run.start, run.end);
+      run.textElement.insertText(run.start, newText);
+      run.end = run.start + newText.length - 1;
+      applyCitationLink_(run.textElement, run.start, run.end, itemKey, run.citation_id, hoverTitle);
+      updated++;
       continue;
     }
 
-    run.textElement.deleteText(run.start, run.end);
-    run.textElement.insertText(run.start, newText);
-    run.end = run.start + newText.length - 1;
-    applyCitationLink_(run.textElement, run.start, run.end, itemKey, run.citation_id);
-    updated++;
+    var nextUrl = buildCitationUrl_(itemKey, run.citation_id, hoverTitle);
+    if (nextUrl !== run.url) {
+      applyCitationLink_(run.textElement, run.start, run.end, itemKey, run.citation_id, hoverTitle);
+    }
+    unchanged++;
   }
 
   return { updated: updated, unchanged: unchanged, skipped: skipped };

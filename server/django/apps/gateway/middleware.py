@@ -23,7 +23,7 @@ class ApiCsrfExemptMiddleware:
 
     def _exempt_from_csrf(self, request) -> bool:
         path = request.path
-        if path.startswith(self.API_PREFIX):
+        if path.startswith(self.API_PREFIX) or path.startswith("/cite/"):
             return True
         return any(path.startswith(f"/{prefix}") for prefix in settings.ZOTERO_PROXY_PREFIXES)
 
@@ -34,13 +34,14 @@ class ApiKeyMiddleware:
     - /api/v1/* (import)
     - proxowane ścieżki Zotero (/connector/*, /api/users/*, …)
 
-    Wyjątki: /app/ (sesja admin), /captcha/, /static/, health.
+    Wyjątki: /app/ (sesja admin), /captcha/, /static/, /cite/ (publiczna karta pracy), health.
     """
 
     EXEMPT_PREFIXES = (
         "/app/",
         "/captcha/",
         "/static/",
+        "/cite/",
     )
 
     def __init__(self, get_response):

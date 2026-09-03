@@ -35,6 +35,11 @@ class TestApiKeyMiddleware:
         response = api_client.get("/api/v1/health/live")
         assert response.status_code == 200
 
+    def test_cite_landing_exempt_from_api_key(self, api_client):
+        response = api_client.get("/cite/bad_key")
+        assert response.status_code == 404
+        assert response.status_code != 401
+
     def test_health_zotero_requires_api_key(self, api_client):
         response = api_client.get("/api/v1/health/zotero")
         assert response.status_code == 401

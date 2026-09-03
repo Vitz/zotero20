@@ -71,6 +71,22 @@ fi
 
 echo "public build OK: ${BUILD}"
 
+# /cite/* musi iść do Django bez X-API-Key (linki z Google Docs). 404 = trasa istnieje.
+CITE_CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "${BASE}/cite/bad_key" || true)
+case "$CITE_CODE" in
+  401)
+    echo "BŁĄD: ${BASE}/cite/bad_key → HTTP 401 (publiczna karta cytowania wymaga klucza)"
+    exit 1
+    ;;
+  404|200|502)
+    echo "public /cite/* → HTTP ${CITE_CODE} OK"
+    ;;
+  *)
+    echo "BŁĄD: ${BASE}/cite/bad_key → HTTP ${CITE_CODE:-000}"
+    exit 1
+    ;;
+esac
+
 if [ -z "$API_KEY" ]; then
   echo "Pominięto kontrolę endpointów z kluczem (brak ZOTERO20_API_KEY)"
   exit 0

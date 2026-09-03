@@ -126,6 +126,17 @@
       word-break: break-word;
     }
     .collection-item-meta a { word-break: break-all; }
+    .collection-item-orcid {
+      font-size: 10px;
+      color: #888;
+      margin-top: 1px;
+      line-height: 1.3;
+    }
+    .collection-item-orcid a {
+      color: #888;
+      text-decoration: none;
+    }
+    .collection-item-orcid a:hover { text-decoration: underline; }
     .collection-remove-btn {
       background: #fff3e0;
       border: 1px solid #ffcc80;
@@ -230,70 +241,14 @@
   <div id="version-warning"></div>
 
   <div class="tabs">
-    <button type="button" onclick="showTab('settings')">Ustawienia</button>
     <button type="button" onclick="showTab('doi')">Pojedynczy DOI</button>
     <button type="button" onclick="showTab('orcid')">Autor (ORCID)</button>
-    <button type="button" onclick="showTab('biblio')">Cytowania</button>
     <button type="button" onclick="showTab('kolekcja')">Kolekcja</button>
-    <button type="button" onclick="showTab('status')">Status</button>
+    <button type="button" onclick="showTab('biblio')">Cytowania</button>
+    <button type="button" onclick="showTab('settings')">Ustawienia</button>
   </div>
 
-  <div id="tab-settings" class="tab active">
-    <p>Wybierz kolekcję Zotero <strong>dla tego dokumentu</strong> — każdy import trafi tam automatycznie.
-      Nowy dokument może mieć inną kolekcję niż poprzedni.</p>
-    <label for="default-collection">Kolekcja tego dokumentu</label>
-    <select id="default-collection" disabled>
-      <option value="">Ładowanie kolekcji…</option>
-    </select>
-    <button id="btn-save-default" type="button" onclick="saveDefaultCollection()" disabled>Zapisz kolekcję dokumentu</button>
-    <p id="collections-source-hint" class="hint" style="font-size:11px;color:#555;margin-top:8px;">
-      Ładowanie źródła kolekcji…
-    </p>
-
-    <label for="citation-locale">Język cytowań (et al. / i in.)</label>
-    <select id="citation-locale" onchange="persistCitationLocale()">
-      <option value="en-US">English — et al.</option>
-      <option value="pl-PL">Polski — i in.</option>
-    </select>
-    <p class="hint" style="font-size:11px;color:#555;margin-top:6px;">
-      Dotyczy tekstu cytowań i bibliografii (CSL), nie języka panelu.
-      Praca po angielsku → English. Po zmianie kliknij
-      <strong>Zmień styl</strong> w zakładce Cytowania, żeby przeliczyć istniejące wpisy.
-    </p>
-
-    <details style="margin-top:12px;">
-      <summary>Tryb diagnostyczny (debug)</summary>
-      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin-top:8px;">
-        <input id="debug-mode" type="checkbox" onchange="persistDebugMode()">
-        Pełne błędy API i odpowiedzi w panelu statusu
-      </label>
-      <p class="hint" style="font-size:11px;color:#555;margin-top:6px;">
-        Włącza szczegółowe komunikaty błędów i fragmenty odpowiedzi serwera (parametr <code>?debug=1</code>).
-        Przydatne przy problemach ze stylami lub cytowaniami.
-      </p>
-    </details>
-
-    <div id="manual-collection-block">
-      <p id="manual-collection-intro">
-        <strong>Lista pusta?</strong> Wpisz klucz kolekcji ręcznie albo sprawdź konfigurację serwera.
-      </p>
-      <p>
-        Klucz znajdziesz w adresie kolekcji na zotero.org, np.<br>
-        <code>https://www.zotero.org/knsz/collections/<strong>FVIAD3D8</strong>/collection</code>
-      </p>
-      <p id="manual-collection-sync-note" style="font-size:11px;color:#555;display:none;">
-        Import zadziała dopiero, gdy ta kolekcja istnieje w bibliotece na serwerze — zwykle po synchronizacji
-        Zotero (Docker) z kontem zotero.org. Po sync klucze online i serwerowe są identyczne.
-      </p>
-      <label for="manual-collection-key">Klucz kolekcji (8 znaków)</label>
-      <input id="manual-collection-key" type="text" placeholder="FVIAD3D8" maxlength="8" autocapitalize="characters" spellcheck="false">
-      <label for="manual-collection-name">Nazwa (opcjonalnie, do wyświetlania)</label>
-      <input id="manual-collection-name" type="text" placeholder="Moja kolekcja">
-      <button id="btn-save-manual" type="button" onclick="saveManualCollection()">Zapisz klucz ręcznie</button>
-    </div>
-  </div>
-
-  <div id="tab-doi" class="tab">
+  <div id="tab-doi" class="tab active">
     <div id="current-collection-doi" class="current-collection" style="display:none;">
       <strong>Kolekcja tego dokumentu</strong>
       <span id="current-collection-doi-label"></span>
@@ -358,14 +313,8 @@
     <p class="hint" style="font-size:11px;color:#555;margin-top:6px;">
       Jeden przycisk przelicza <strong>wszystkie</strong> cytowania w tekście i bibliografię tym samym stylem.
       W stylach numerycznych (IEEE, Vancouver) numery [1], [2] są nadawane wg kolejności cytowania.
-      Język cytowań (et al. / i in.) ustawiasz w zakładce Ustawienia — po zmianie kliknij ten przycisk.
+      Język cytowań i tryb wstawiania — zakładka Ustawienia; po zmianie języka kliknij ten przycisk.
     </p>
-
-    <label for="insert-mode">Gdzie wstawiać cytowanie</label>
-    <select id="insert-mode" onchange="persistInsertMode()">
-      <option value="cursor">W miejscu kursora w dokumencie</option>
-      <option value="placeholder">Zamiast [*] lub [DOI] w tekście</option>
-    </select>
 
     <button id="btn-insert-biblio" type="button" onclick="doInsertBibliography()" disabled>Wstaw bibliografię</button>
     <button id="btn-refresh-biblio" type="button" onclick="doRefreshBibliography()" disabled>Odśwież bibliografię</button>
@@ -401,7 +350,7 @@
       Usuń pozycję z kolekcji na serwerze. Pozycja pozostaje w bibliotece Zotero — znika tylko z tej kolekcji.
     </p>
     <div id="kolekcja-search-wrap" style="position:relative;margin-bottom:6px;">
-      <input id="kolekcja-search" type="search" placeholder="Szukaj po tytule, autorze, DOI…" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;margin-top:0;padding:6px 28px 6px 6px;font-size:12px;">
+      <input id="kolekcja-search" type="search" placeholder="Szukaj: tytuł, autor, skrót, DOI, ORCID…" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;margin-top:0;padding:6px 28px 6px 6px;font-size:12px;">
       <button type="button" id="kolekcja-search-clear" title="Wyczyść" aria-label="Wyczyść" style="position:absolute;right:2px;top:50%;transform:translateY(-50%);width:auto;margin:0;padding:2px 8px;font-size:16px;line-height:1;background:transparent;border:none;color:#666;cursor:pointer;display:none;">×</button>
     </div>
     <p id="kolekcja-filter-count" style="font-size:11px;color:#555;margin:0 0 6px;display:none;"></p>
@@ -412,9 +361,68 @@
     <button type="button" onclick="loadKolekcjaTab()" style="margin-top:10px;">Odśwież listę</button>
   </div>
 
-  <div id="tab-status" class="tab">
-    <button type="button" onclick="loadStatus()">Odśwież status</button>
-    <pre id="status-text"></pre>
+  <div id="tab-settings" class="tab">
+    <h3 style="margin:0 0 6px;font-size:13px;">Kolekcja tego dokumentu</h3>
+    <p class="hint" style="font-size:11px;color:#555;margin:0 0 8px;">
+      Każdy import trafia do wybranej kolekcji. Nowy dokument może mieć inną niż poprzedni.
+    </p>
+    <label for="default-collection">Kolekcja</label>
+    <select id="default-collection" disabled>
+      <option value="">Ładowanie kolekcji…</option>
+    </select>
+    <button id="btn-save-default" type="button" onclick="saveDefaultCollection()" disabled>Zapisz kolekcję dokumentu</button>
+    <p id="collections-source-hint" class="hint" style="font-size:11px;color:#555;margin-top:8px;">
+      Ładowanie źródła kolekcji…
+    </p>
+
+    <div id="manual-collection-block">
+      <p id="manual-collection-intro">
+        <strong>Lista pusta?</strong> Wpisz klucz kolekcji ręcznie albo sprawdź konfigurację serwera.
+      </p>
+      <p>
+        Klucz znajdziesz w adresie kolekcji na zotero.org, np.<br>
+        <code>https://www.zotero.org/knsz/collections/<strong>FVIAD3D8</strong>/collection</code>
+      </p>
+      <p id="manual-collection-sync-note" style="font-size:11px;color:#555;display:none;">
+        Import zadziała dopiero, gdy ta kolekcja istnieje w bibliotece na serwerze — zwykle po synchronizacji
+        Zotero (Docker) z kontem zotero.org. Po sync klucze online i serwerowe są identyczne.
+      </p>
+      <label for="manual-collection-key">Klucz kolekcji (8 znaków)</label>
+      <input id="manual-collection-key" type="text" placeholder="FVIAD3D8" maxlength="8" autocapitalize="characters" spellcheck="false">
+      <label for="manual-collection-name">Nazwa (opcjonalnie, do wyświetlania)</label>
+      <input id="manual-collection-name" type="text" placeholder="Moja kolekcja">
+      <button id="btn-save-manual" type="button" onclick="saveManualCollection()">Zapisz klucz ręcznie</button>
+    </div>
+
+    <h3 style="margin:16px 0 6px;font-size:13px;">Cytowania — język i wstawianie</h3>
+    <label for="citation-locale">Język cytowań (et al. / i in.)</label>
+    <select id="citation-locale" onchange="persistCitationLocale()">
+      <option value="en-US">English — et al.</option>
+      <option value="pl-PL">Polski — i in.</option>
+    </select>
+    <p class="hint" style="font-size:11px;color:#555;margin-top:6px;">
+      Dotyczy tekstu cytowań i bibliografii (CSL), nie języka panelu.
+      Po zmianie kliknij <strong>Zmień styl</strong> w zakładce Cytowania.
+    </p>
+
+    <label for="insert-mode">Gdzie wstawiać cytowanie</label>
+    <select id="insert-mode" onchange="persistInsertMode()">
+      <option value="cursor">W miejscu kursora w dokumencie</option>
+      <option value="placeholder">Zamiast [*] lub [DOI] w tekście</option>
+    </select>
+
+    <h3 style="margin:16px 0 6px;font-size:13px;">Tryb diagnostyczny</h3>
+    <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin-top:4px;">
+      <input id="debug-mode" type="checkbox" onchange="persistDebugMode()">
+      Pełne błędy API i odpowiedzi poniżej
+    </label>
+    <p class="hint" style="font-size:11px;color:#555;margin-top:6px;">
+      Szczegółowe komunikaty błędów i fragmenty odpowiedzi serwera (<code>?debug=1</code>).
+    </p>
+
+    <h3 style="margin:16px 0 6px;font-size:13px;">Status</h3>
+    <button type="button" onclick="loadStatus()" style="margin-top:0;">Odśwież status</button>
+    <pre id="status-text" style="margin:8px 0 0;padding:8px;background:#f5f5f5;border-radius:4px;font-size:11px;white-space:pre-wrap;word-break:break-word;"></pre>
   </div>
 
   <div id="setup-warning"></div>
@@ -432,7 +440,7 @@
     <p id="post-import-summary"></p>
     <button type="button" onclick="pasteLastImport()">Wstaw cytowanie</button>
     <p class="hint">
-      Cytowanie trafia w miejsce kursora (albo zamiast <strong>[*]</strong> / <strong>[DOI]</strong> / <strong>[10.xxxx/…]</strong> — zależnie od trybu w zakładce Cytowania)
+      Cytowanie trafia w miejsce kursora (albo zamiast <strong>[*]</strong> / <strong>[DOI]</strong> / <strong>[10.xxxx/…]</strong> — zależnie od trybu w zakładce Ustawienia)
       i zostaje <strong>śledzone</strong>: zmiana stylu przelicza je razem z bibliografią.
       Śledzenie przeżywa zamknięcie dokumentu, kopiowanie tekstu i kopię pliku.
     </p>
@@ -441,7 +449,7 @@
   <div id="study-overview" style="display:none;">
     <h3>Pozycje w kolekcji</h3>
     <div id="study-overview-search-wrap">
-      <input id="study-overview-search" type="search" placeholder="Szukaj po tytule, autorze, DOI…" autocomplete="off" spellcheck="false">
+      <input id="study-overview-search" type="search" placeholder="Szukaj: tytuł, autor, skrót, DOI, ORCID…" autocomplete="off" spellcheck="false">
       <button type="button" id="study-overview-search-clear" title="Wyczyść" aria-label="Wyczyść">×</button>
     </div>
     <p id="study-overview-filter-count"></p>
@@ -451,7 +459,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.1.4';
+    var SIDEBAR_VERSION = '2.1.5';
 
     // UrlFetchApp ma limity dzienne — 3 s to kompromis vs prośba o 1 s.
     // Przy długim otwarciu sidebara rozważ później 5 s w ustawieniach.
@@ -635,7 +643,7 @@
     function showTab(name) {
       document.querySelectorAll('.tab').forEach(function (el) { el.classList.remove('active'); });
       document.getElementById('tab-' + name).classList.add('active');
-      if (name === 'status') loadStatus();
+      if (name === 'settings') loadStatus();
       if (name === 'kolekcja') loadKolekcjaTab();
     }
 
@@ -833,10 +841,7 @@
     }
 
     function formatDisplayTitle(item, max) {
-      var title = String(item.title || '').trim();
-      var abbrev = String(item.journal_abbrev || '').trim();
-      var text = abbrev ? '[' + abbrev + '] ' + title : title;
-      return truncateTitle(text, max);
+      return truncateTitle(String(item.title || '').trim(), max);
     }
 
     function formatFirstAuthor(creators) {
@@ -861,29 +866,56 @@
       return match ? match[1] : dateStr;
     }
 
+    function normalizeOrcidId(value) {
+      var v = String(value || '').trim().replace(/^https?:\/\/orcid\.org\//i, '');
+      return /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/i.test(v) ? v : '';
+    }
+
     function appendItemMeta(parent, item) {
       var parts = [];
+      var abbrev = String(item.journal_abbrev || '').trim();
       var author = formatFirstAuthor(item.creators || item.authors);
-      if (author) parts.push(author);
       var date = formatItemDate(item.date || item.year);
-      if (date) parts.push(date);
       var doi = stripDoiPrefix(item.doi);
-      if (!parts.length && !doi) return;
-      var meta = document.createElement('div');
-      meta.className = 'collection-item-meta';
-      if (parts.length) {
-        meta.appendChild(document.createTextNode(parts.join(' · ') + (doi ? ' · ' : '')));
+      var orcid = normalizeOrcidId(item.orcid || item.first_author_orcid || '');
+
+      var authorSeg = '';
+      if (abbrev) authorSeg = '[' + abbrev + ']';
+      if (author) authorSeg = authorSeg ? authorSeg + ' ' + author : author;
+      if (authorSeg) parts.push(authorSeg);
+      if (date) parts.push(date);
+
+      if (parts.length || doi) {
+        var meta = document.createElement('div');
+        meta.className = 'collection-item-meta';
+        if (parts.length) {
+          meta.appendChild(document.createTextNode(parts.join(' · ') + (doi ? ' · ' : '')));
+        }
+        if (doi) {
+          var link = document.createElement('a');
+          link.href = 'https://doi.org/' + encodeURI(doi);
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = doi;
+          link.onclick = function (e) { e.stopPropagation(); };
+          meta.appendChild(link);
+        }
+        parent.appendChild(meta);
       }
-      if (doi) {
-        var link = document.createElement('a');
-        link.href = 'https://doi.org/' + encodeURI(doi);
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.textContent = doi;
-        link.onclick = function (e) { e.stopPropagation(); };
-        meta.appendChild(link);
+
+      if (orcid) {
+        var orcidLine = document.createElement('div');
+        orcidLine.className = 'collection-item-orcid';
+        orcidLine.appendChild(document.createTextNode('ORCID '));
+        var orcidLink = document.createElement('a');
+        orcidLink.href = 'https://orcid.org/' + encodeURIComponent(orcid);
+        orcidLink.target = '_blank';
+        orcidLink.rel = 'noopener noreferrer';
+        orcidLink.textContent = orcid;
+        orcidLink.onclick = function (e) { e.stopPropagation(); };
+        orcidLine.appendChild(orcidLink);
+        parent.appendChild(orcidLine);
       }
-      parent.appendChild(meta);
     }
 
     var studyOverviewState = {
@@ -894,10 +926,14 @@
     };
 
     function studyItemSearchText(item) {
+      var doi = stripDoiPrefix(item.doi);
+      var orcid = normalizeOrcidId(item.orcid || item.first_author_orcid || '');
       var parts = [
         String(item.title || ''),
         String(item.journal_abbrev || ''),
         String(item.doi || ''),
+        doi,
+        orcid,
         String(item.date || item.year || ''),
         String(item.key || item.item_key || ''),
       ];
@@ -910,6 +946,8 @@
             parts.push(String(c.lastName || c.last_name || ''));
             parts.push(String(c.firstName || c.first_name || ''));
             if (c.name) parts.push(String(c.name));
+            var creatorOrcid = normalizeOrcidId(c.ORCID || c.orcid || '');
+            if (creatorOrcid) parts.push(creatorOrcid);
           }
         });
       } else if (typeof creators === 'string') {

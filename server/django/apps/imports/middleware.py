@@ -55,3 +55,36 @@ def normalize_orcid(value: str) -> str | None:
     if match:
         return match.group(1)
     return None
+
+
+def extract_item_orcid(data: dict) -> str:
+    """ORCID pierwszego autora z creators[].ORCID lub pola extra."""
+    creators = data.get("creators") or []
+    if isinstance(creators, list):
+        for creator in creators:
+            if not isinstance(creator, dict):
+                continue
+            for key in ("ORCID", "orcid", "Orcid"):
+                raw = creator.get(key)
+                if not raw:
+                    continue
+                oid = normalize_orcid(str(raw))
+                if oid:
+                    return oid
+    extra = str(data.get("extra") or "")
+    for line in extra.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if ":" in line:
+            label, _, rest = line.partition(":")
+            if label.strip().lower() != "orcid":
+                continue
+            oid = normalize_orcid(rest.strip())
+            if oid:
+                return oid
+        else:
+            oid = normalize_orcid(line)
+            if oid:
+                return oid
+    return ""

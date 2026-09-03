@@ -12,7 +12,8 @@
         {
           "creatorType": "author",
           "lastName": "Smith",
-          "firstName": "John"
+          "firstName": "John",
+          "ORCID": "0000-0002-1825-0097"
         }
       ],
       "collections": ["ABCD1234"]

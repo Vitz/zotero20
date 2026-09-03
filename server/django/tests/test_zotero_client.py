@@ -1,7 +1,7 @@
 import pytest
 import responses
 
-from apps.imports.middleware import normalize_doi, normalize_orcid
+from apps.imports.middleware import extract_item_orcid, normalize_doi, normalize_orcid
 from apps.imports.services.exceptions import ZoteroClientError
 from apps.imports.services.zotero import ZoteroClient
 from tests.constants import COLLECTION_KEY, ITEM_KEY_1, TEST_DOI
@@ -27,6 +27,27 @@ class TestNormalizeHelpers:
         assert normalize_orcid("0000-0002-1825-0097") == "0000-0002-1825-0097"
         assert normalize_orcid("https://orcid.org/0000-0002-1825-0097") == "0000-0002-1825-0097"
         assert normalize_orcid("bad") is None
+
+    def test_extract_item_orcid_from_creator_and_extra(self):
+        assert (
+            extract_item_orcid(
+                {
+                    "creators": [
+                        {
+                            "creatorType": "author",
+                            "lastName": "Smith",
+                            "ORCID": "https://orcid.org/0000-0002-1825-0097",
+                        }
+                    ]
+                }
+            )
+            == "0000-0002-1825-0097"
+        )
+        assert (
+            extract_item_orcid({"extra": "ORCID: 0000-0001-2345-6789\nNote: x"})
+            == "0000-0001-2345-6789"
+        )
+        assert extract_item_orcid({"creators": [{"lastName": "X"}], "extra": ""}) == ""
 
 
 class TestZoteroClient:

@@ -6,6 +6,8 @@ import time
 import requests
 from django.conf import settings
 
+from apps.imports.middleware import extract_item_orcid
+
 from .bibliography import DEFAULT_LOCALE, parse_formatted_items, resolve_style_id
 from .citation import format_citation_text, parse_citation_html
 from .exceptions import ZoteroClientError
@@ -60,6 +62,7 @@ class ZoteroClient:
             "title": data.get("title", ""),
             "journal_abbrev": (data.get("journalAbbreviation") or "").strip(),
             "doi": data.get("DOI", ""),
+            "orcid": extract_item_orcid(data),
             "date": data.get("date", ""),
             "itemType": data.get("itemType", ""),
             "creators": creators,

@@ -495,7 +495,9 @@ class TestCollectionItemsEndpoint:
         assert data["collection_key"] == COLLECTION_KEY
         assert len(data["items"]) == 2
         assert data["items"][0]["journal_abbrev"] == "Nature"
+        assert data["items"][0]["orcid"] == "0000-0002-1825-0097"
         assert data["items"][1]["journal_abbrev"] == ""
+        assert data["items"][1]["orcid"] == ""
 
 
 @pytest.mark.django_db

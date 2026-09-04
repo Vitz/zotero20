@@ -243,6 +243,7 @@
   <div class="tabs">
     <button type="button" onclick="showTab('doi')">Pojedynczy DOI</button>
     <button type="button" onclick="showTab('orcid')">Autor (ORCID)</button>
+    <button type="button" onclick="showTab('inne')">Inne</button>
     <button type="button" onclick="showTab('kolekcja')">Kolekcja</button>
     <button type="button" onclick="showTab('biblio')">Cytowania</button>
     <button type="button" onclick="showTab('settings')">Ustawienia</button>
@@ -294,6 +295,53 @@
         </p>
       </div>
     </details>
+  </div>
+
+  <div id="tab-inne" class="tab">
+    <div id="current-collection-inne" class="current-collection" style="display:none;">
+      <strong>Kolekcja tego dokumentu</strong>
+      <span id="current-collection-inne-label"></span>
+    </div>
+
+    <label for="inne-item-type">Typ pozycji</label>
+    <select id="inne-item-type" onchange="onInneTypeChange()">
+      <option value="preprint">Preprint / artykuł bez DOI</option>
+      <option value="journalArticle">Artykuł (bez DOI)</option>
+      <option value="book">Książka</option>
+      <option value="bookSection">Rozdział książki</option>
+      <option value="thesis">Praca dyplomowa</option>
+      <option value="report">Raport</option>
+      <option value="webpage">Strona WWW</option>
+    </select>
+
+    <div id="inne-fields"></div>
+
+    <div id="inne-creators-block" style="margin-top:10px;">
+      <label>Autorzy</label>
+      <div id="inne-creators"></div>
+      <button type="button" id="btn-inne-add-creator" onclick="addInneCreatorRow()" style="margin-top:4px;">
+        + Dodaj autora
+      </button>
+    </div>
+
+    <details id="inne-gemini-block" style="margin-top:12px;">
+      <summary>Uzupełnij z tekstu (Gemini)</summary>
+      <p class="hint" style="font-size:11px;color:#555;margin-top:6px;">
+        Wklej abstrakt, opis albo cytowanie. Model wypełni pola poniżej — sprawdź je przed utworzeniem.
+        Tekst trafia do Google Gemini (klucz tylko na serwerze).
+      </p>
+      <label for="inne-gemini-text">Tekst źródłowy</label>
+      <textarea id="inne-gemini-text" rows="5" placeholder="Wklej opis, abstrakt, cytowanie…" style="width:100%;box-sizing:border-box;"></textarea>
+      <button id="btn-inne-gemini" type="button" onclick="doInneDescribe()" disabled>
+        Uzupełnij pola (Gemini)
+      </button>
+      <p id="inne-gemini-note" class="hint" style="font-size:11px;color:#555;margin-top:4px;"></p>
+      <div id="inne-gemini-warnings" style="display:none;font-size:11px;color:#8a5a00;margin-top:6px;"></div>
+    </details>
+
+    <button id="btn-import-inne" type="button" onclick="doImportInne()" disabled style="margin-top:12px;">
+      Utwórz w kolekcji
+    </button>
   </div>
 
   <div id="tab-biblio" class="tab">
@@ -488,7 +536,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.1.6';
+    var SIDEBAR_VERSION = '2.2.0';
 
     // UrlFetchApp ma limity dzienne — 3 s to kompromis vs prośba o 1 s.
     // Przy długim otwarciu sidebara rozważ później 5 s w ustawieniach.
@@ -676,6 +724,10 @@
       document.getElementById('tab-' + name).classList.add('active');
       if (name === 'settings') loadStatus();
       if (name === 'kolekcja') loadKolekcjaTab();
+      if (name === 'inne') {
+        ensureInneFormBuilt();
+        refreshInneGeminiAvailability();
+      }
     }
 
     function setStatus(msg, isError) {
@@ -1396,6 +1448,8 @@
     function setImportEnabled(enabled) {
       document.getElementById('btn-import-doi').disabled = !enabled;
       document.getElementById('btn-import-orcid').disabled = !enabled;
+      var inneBtn = document.getElementById('btn-import-inne');
+      if (inneBtn) inneBtn.disabled = !enabled;
       setBibliographyEnabled(enabled);
     }
 
@@ -1772,7 +1826,7 @@
     function updateCurrentCollectionLabels() {
       var label = appState.defaultCollection.name || appState.defaultCollection.key || '';
       var hasDefault = !!appState.defaultCollection.key;
-      ['doi', 'orcid', 'biblio', 'kolekcja'].forEach(function (suffix) {
+      ['doi', 'orcid', 'inne', 'biblio', 'kolekcja'].forEach(function (suffix) {
         var box = document.getElementById('current-collection-' + suffix);
         var text = document.getElementById('current-collection-' + suffix + '-label');
         if (hasDefault) {
@@ -2045,6 +2099,350 @@
     function looksLikeOrcid(value) {
       var v = String(value || '').trim().replace(/^https?:\/\/orcid\.org\//i, '');
       return /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/i.test(v);
+    }
+
+    var INNE_FIELD_DEFS = {
+      preprint: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'date', label: 'Data' },
+        { key: 'repository', label: 'Repozytorium' },
+        { key: 'archiveID', label: 'ID w archiwum' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' }
+      ],
+      journalArticle: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'publicationTitle', label: 'Czasopismo' },
+        { key: 'date', label: 'Data' },
+        { key: 'volume', label: 'Tom' },
+        { key: 'issue', label: 'Numer' },
+        { key: 'pages', label: 'Strony' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'url', label: 'URL' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' }
+      ],
+      book: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'publisher', label: 'Wydawca' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'date', label: 'Data' },
+        { key: 'ISBN', label: 'ISBN' },
+        { key: 'numPages', label: 'Liczba stron' },
+        { key: 'edition', label: 'Wydanie' },
+        { key: 'url', label: 'URL' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' }
+      ],
+      bookSection: [
+        { key: 'title', label: 'Tytuł rozdziału', required: true },
+        { key: 'bookTitle', label: 'Tytuł książki' },
+        { key: 'publisher', label: 'Wydawca' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'date', label: 'Data' },
+        { key: 'pages', label: 'Strony' },
+        { key: 'ISBN', label: 'ISBN' },
+        { key: 'url', label: 'URL' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' }
+      ],
+      thesis: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'university', label: 'Uczelnia' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'thesisType', label: 'Typ pracy' },
+        { key: 'date', label: 'Data' },
+        { key: 'numPages', label: 'Liczba stron' },
+        { key: 'url', label: 'URL' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' }
+      ],
+      report: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'institution', label: 'Instytucja' },
+        { key: 'reportNumber', label: 'Numer raportu' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'date', label: 'Data' },
+        { key: 'pages', label: 'Strony' },
+        { key: 'url', label: 'URL' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' }
+      ],
+      webpage: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'websiteTitle', label: 'Nazwa strony' },
+        { key: 'url', label: 'URL' },
+        { key: 'accessDate', label: 'Data dostępu' },
+        { key: 'date', label: 'Data publikacji' },
+        { key: 'abstractNote', label: 'Opis', textarea: true },
+        { key: 'extra', label: 'Extra' }
+      ]
+    };
+
+    var inneFormReady = false;
+    var inneGeminiConfigured = null;
+
+    function ensureInneFormBuilt() {
+      if (!inneFormReady) {
+        onInneTypeChange();
+        addInneCreatorRow();
+        inneFormReady = true;
+      }
+    }
+
+    function onInneTypeChange() {
+      var type = document.getElementById('inne-item-type').value;
+      var defs = INNE_FIELD_DEFS[type] || INNE_FIELD_DEFS.preprint;
+      var box = document.getElementById('inne-fields');
+      box.innerHTML = '';
+      defs.forEach(function (def) {
+        var lab = document.createElement('label');
+        lab.setAttribute('for', 'inne-field-' + def.key);
+        lab.textContent = def.label + (def.required ? ' *' : '');
+        box.appendChild(lab);
+        var input;
+        if (def.textarea) {
+          input = document.createElement('textarea');
+          input.rows = 3;
+        } else {
+          input = document.createElement('input');
+          input.type = 'text';
+        }
+        input.id = 'inne-field-' + def.key;
+        input.setAttribute('data-inne-key', def.key);
+        input.style.width = '100%';
+        input.style.boxSizing = 'border-box';
+        box.appendChild(input);
+      });
+    }
+
+    function addInneCreatorRow(data) {
+      data = data || {};
+      var box = document.getElementById('inne-creators');
+      var row = document.createElement('div');
+      row.className = 'inne-creator-row';
+      row.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;align-items:center;';
+
+      var typeSel = document.createElement('select');
+      ['author', 'editor', 'contributor', 'translator'].forEach(function (t) {
+        var opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t === 'author' ? 'autor' : t === 'editor' ? 'redaktor' : t;
+        if ((data.creatorType || 'author') === t) opt.selected = true;
+        typeSel.appendChild(opt);
+      });
+      typeSel.style.width = '90px';
+
+      var first = document.createElement('input');
+      first.type = 'text';
+      first.placeholder = 'Imię';
+      first.value = data.firstName || '';
+      first.style.flex = '1';
+      first.style.minWidth = '70px';
+
+      var last = document.createElement('input');
+      last.type = 'text';
+      last.placeholder = 'Nazwisko';
+      last.value = data.lastName || '';
+      last.style.flex = '1';
+      last.style.minWidth = '70px';
+
+      var name = document.createElement('input');
+      name.type = 'text';
+      name.placeholder = 'lub pełne imię';
+      name.value = data.name || '';
+      name.style.flex = '1 1 100%';
+
+      var remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = '×';
+      remove.title = 'Usuń';
+      remove.onclick = function () { row.parentNode.removeChild(row); };
+
+      row.appendChild(typeSel);
+      row.appendChild(first);
+      row.appendChild(last);
+      row.appendChild(remove);
+      row.appendChild(name);
+      box.appendChild(row);
+    }
+
+    function collectInneCreators() {
+      var creators = [];
+      document.querySelectorAll('#inne-creators .inne-creator-row').forEach(function (row) {
+        var inputs = row.querySelectorAll('input, select');
+        var creatorType = inputs[0].value || 'author';
+        var firstName = (inputs[1].value || '').trim();
+        var lastName = (inputs[2].value || '').trim();
+        var name = (inputs[3] && inputs[3].value || '').trim();
+        if (name) {
+          creators.push({ creatorType: creatorType, name: name });
+        } else if (firstName || lastName) {
+          creators.push({
+            creatorType: creatorType,
+            firstName: firstName,
+            lastName: lastName
+          });
+        }
+      });
+      return creators;
+    }
+
+    function collectInnePayload() {
+      var itemType = document.getElementById('inne-item-type').value;
+      var payload = { itemType: itemType };
+      document.querySelectorAll('#inne-fields [data-inne-key]').forEach(function (el) {
+        var key = el.getAttribute('data-inne-key');
+        var val = (el.value || '').trim();
+        if (val) payload[key] = val;
+      });
+      var creators = collectInneCreators();
+      if (creators.length) payload.creators = creators;
+      return payload;
+    }
+
+    function applyInneDraft(draft) {
+      if (!draft || typeof draft !== 'object') return;
+      if (draft.itemType) {
+        var sel = document.getElementById('inne-item-type');
+        if (sel) {
+          sel.value = draft.itemType;
+          onInneTypeChange();
+        }
+      }
+      document.querySelectorAll('#inne-fields [data-inne-key]').forEach(function (el) {
+        var key = el.getAttribute('data-inne-key');
+        if (draft[key] != null && draft[key] !== '') {
+          el.value = String(draft[key]);
+        }
+      });
+      var box = document.getElementById('inne-creators');
+      box.innerHTML = '';
+      var creators = draft.creators || [];
+      if (creators.length) {
+        creators.forEach(function (c) { addInneCreatorRow(c); });
+      } else {
+        addInneCreatorRow();
+      }
+    }
+
+    function refreshInneGeminiAvailability() {
+      var btn = document.getElementById('btn-inne-gemini');
+      var note = document.getElementById('inne-gemini-note');
+      if (inneGeminiConfigured === true) {
+        btn.disabled = false;
+        note.textContent = 'Gemini dostępne na serwerze.';
+        return;
+      }
+      if (inneGeminiConfigured === false) {
+        btn.disabled = true;
+        note.textContent = 'Brak GEMINI_API_KEY na serwerze — wypełnij pola ręcznie.';
+        return;
+      }
+      note.textContent = 'Sprawdzam dostępność Gemini…';
+      google.script.run
+        .withSuccessHandler(function (ok) {
+          inneGeminiConfigured = !!ok;
+          btn.disabled = !ok || !appState.defaultCollection.key;
+          note.textContent = ok
+            ? 'Gemini dostępne na serwerze.'
+            : 'Brak GEMINI_API_KEY na serwerze — wypełnij pola ręcznie.';
+        })
+        .withFailureHandler(function () {
+          inneGeminiConfigured = false;
+          btn.disabled = true;
+          note.textContent = 'Nie udało się sprawdzić Gemini — wypełnij pola ręcznie.';
+        })
+        .getGeminiConfigured();
+    }
+
+    function doInneDescribe() {
+      var itemType = document.getElementById('inne-item-type').value;
+      var text = document.getElementById('inne-gemini-text').value.trim();
+      if (!text) { setStatus('Wklej tekst do uzupełnienia.', true); return; }
+      var warnEl = document.getElementById('inne-gemini-warnings');
+      warnEl.style.display = 'none';
+      warnEl.textContent = '';
+      setStatus('Uzupełniam pola przez Gemini…');
+      document.getElementById('btn-inne-gemini').disabled = true;
+      google.script.run
+        .withSuccessHandler(function (r) {
+          document.getElementById('btn-inne-gemini').disabled = !inneGeminiConfigured;
+          applyInneDraft(r.draft || {});
+          var warnings = r.warnings || [];
+          if (warnings.length) {
+            warnEl.style.display = 'block';
+            warnEl.textContent = 'Ostrzeżenia: ' + warnings.join(' · ');
+          }
+          setStatus('Pola uzupełnione — sprawdź i kliknij „Utwórz w kolekcji”.', false);
+        })
+        .withFailureHandler(function (e) {
+          var msg = formatScriptError(e);
+          if (/503|GEMINI_API_KEY|nie jest skonfigurowane/i.test(msg)) {
+            inneGeminiConfigured = false;
+            document.getElementById('btn-inne-gemini').disabled = true;
+            document.getElementById('inne-gemini-note').textContent =
+              'Brak GEMINI_API_KEY na serwerze — wypełnij pola ręcznie.';
+          } else {
+            document.getElementById('btn-inne-gemini').disabled = !inneGeminiConfigured;
+          }
+          setStatus(msg, true);
+        })
+        .describeManualItem(itemType, text);
+    }
+
+    function doImportInne() {
+      ensureInneFormBuilt();
+      var payload = collectInnePayload();
+      if (!(payload.title || '').trim()) {
+        setStatus('Podaj tytuł.', true);
+        return;
+      }
+      if (!appState.defaultCollection.key) {
+        setStatus('Ustaw kolekcję tego dokumentu w zakładce Ustawienia.', true);
+        showTab('settings');
+        return;
+      }
+      var target = { collectionKey: appState.defaultCollection.key };
+      hidePostImport();
+      hideDuplicateOffer();
+      setStatus('Tworzę pozycję w kolekcji…');
+      document.getElementById('btn-import-inne').disabled = true;
+      google.script.run
+        .withSuccessHandler(function (r) {
+          document.getElementById('btn-import-inne').disabled = !appState.defaultCollection.key;
+          var label = appState.defaultCollection.name || r.collection_key || '';
+          if (r.duplicate) {
+            setStatus('Pozycja z tym DOI już w kolekcji.', false);
+            showDuplicateOffer(r);
+            showPostImport(r.doi || '', r.item_key, label, {
+              citationText: r.citation_text || '',
+              hoverTitle: r.title || r.citation_text || '',
+              identifiers: r.doi ? { type: 'doi', value: r.doi } : null
+            });
+            loadStudyOverview();
+            return;
+          }
+          var itemKey = r.item_key || '';
+          var msg = 'Utworzono: ' + (r.title || payload.title) + ' → ' + label;
+          if (r.placeholder_replaced) msg += ' (zamieniono placeholder)';
+          setStatus(msg, !!r.placeholder_error);
+          showPostImport(r.doi || '', itemKey, label, {
+            citationText: r.citation_text || '',
+            hoverTitle: r.title || payload.title || '',
+            placeholderReplaced: r.placeholder_replaced,
+            placeholderError: r.placeholder_error,
+            identifiers: r.doi ? { type: 'doi', value: r.doi } : { type: 'title', value: r.title || payload.title }
+          });
+          loadStudyOverview();
+        })
+        .withFailureHandler(function (e) {
+          document.getElementById('btn-import-inne').disabled = !appState.defaultCollection.key;
+          setStatus(formatScriptError(e), true);
+        })
+        .importManual(payload, target);
     }
 
     function doImportDoi() {

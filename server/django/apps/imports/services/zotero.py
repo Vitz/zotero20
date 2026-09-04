@@ -316,6 +316,41 @@ class ZoteroClient:
 
         return {"success": True, "via": "local_api", "result": body}
 
+    def create_item(self, payload: dict, collection_key: str) -> dict:
+        """Tworzy pozycję z gotowego payloadu Zotero w kolekcji (Local API)."""
+        item = dict(payload)
+        item.pop("collections", None)
+        item = {k: v for k, v in item.items() if v not in ("", None, [], {})}
+
+        response = self._request(
+            "POST",
+            f"/api/users/0/collections/{collection_key}/items",
+            json=[item],
+            headers={"Content-Type": "application/json"},
+        )
+        if response.status_code not in (200, 201, 207):
+            raise ZoteroClientError(
+                f"Local API create item failed: HTTP {response.status_code} — "
+                f"{response.text[:500]}",
+                response.status_code,
+            )
+
+        item_key = self._extract_created_key_(response)
+        try:
+            body = response.json() if response.text else {}
+        except ValueError:
+            body = {"raw": response.text}
+
+        return {
+            "success": True,
+            "via": "local_api",
+            "key": item_key,
+            "itemKey": item_key,
+            "collection_key": collection_key,
+            "title": item.get("title", ""),
+            "result": body,
+        }
+
     def list_collections(self) -> list[dict]:
         response = self._request("GET", "/api/users/0/collections")
         if response.status_code != 200:

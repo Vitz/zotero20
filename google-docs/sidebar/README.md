@@ -1,11 +1,12 @@
 # Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
-Wersja plików Apps Script: **2.1.6** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+Wersja plików Apps Script: **2.2.0** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
 
 ## Co robi panel
 
-**Import** — dodaje pozycje do biblioteki Zotero na serwerze (DOI / ORCID → kolekcja).
+**Import** — dodaje pozycje do biblioteki Zotero na serwerze (DOI / ORCID / ręczne „Inne” → kolekcja).
+Opcjonalnie Gemini (klucz tylko na serwerze) uzupełnia pola z wklejonego tekstu.
 
 **Śledzone cytowania w tekście** — wstawia cytowanie w miejscu kursora (albo zamiast `[*]`) i oznacza je
 ukrytą kotwicą-linkiem `https://zotero.keyweb.pl/cite/<ITEMKEY>?c=<id>&t=<tytuł>`.
@@ -82,7 +83,7 @@ przy pierwszym odczycie w danym dokumencie wartość z Script Properties jest ko
    (albo **Utwórz kolekcję**). Tam też ustaw **Język cytowań** (English = *et al.*, Polski = *i in.*)
    oraz **Wygląd bibliografii** (czcionka / rozmiar). Panel zostaje po polsku.
 2. Zakładka **Cytowania** → wybierz styl CSL i tryb wstawiania (kursor / `[*]`).
-3. Zakładka **DOI** → zaimportuj pracę.
+3. Zakładka **DOI** → zaimportuj pracę. Zakładka **Inne** → książka / preprint / rozdział (ręcznie lub Gemini).
 4. Ustaw kursor w dokumencie → **Wstaw cytowanie**. Cytowanie zostaje kotwicą.
 5. Zakładka **Cytowania** → **Wstaw bibliografię** (tylko cytowane pozycje).
 6. Zmiana stylu albo języka cytowań: **Zmień styl (cytowania + bibliografia)** — przelicza istniejące wpisy.
@@ -116,6 +117,8 @@ Panel pokazuje obie kropki statusu (API / Zotero) przy tytule i odświeża je co
 | `GET /items/<key>?style=&locale=` | tekst cytowania pojedynczej pozycji (`locale`: `en-US` / `pl-PL`, domyślnie `en-US`) |
 | `POST /citations` | cytowania w tekście **i** bibliografia dla listy `item_keys` (jeden styl + `locale`) |
 | `POST /bibliography` | bibliografia z `item_keys` albo z `collection_key` (tryb awaryjny) |
+| `POST /import/manual` | ręczne utworzenie pozycji (zakładka Inne) |
+| `POST /import/describe` | Gemini → draft pól (bez zapisu; wymaga `GEMINI_API_KEY` na serwerze) |
 
 ## Troubleshooting
 

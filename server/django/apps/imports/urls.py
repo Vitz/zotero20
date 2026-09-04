@@ -10,6 +10,8 @@ urlpatterns = [
     path("studies", views.studies_list, name="studies"),
     path("import/doi", views.import_doi, name="import-doi"),
     path("import/orcid", views.import_orcid, name="import-orcid"),
+    path("import/manual", views.import_manual, name="import-manual"),
+    path("import/describe", views.import_describe, name="import-describe"),
     path("collection-items", views.collection_items, name="collection-items"),
     path(
         "collections/<str:collection_key>/items/<str:item_key>",

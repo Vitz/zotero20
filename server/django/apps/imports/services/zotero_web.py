@@ -413,6 +413,48 @@ class ZoteroWebClient:
             "result": create_body,
         }
 
+    def create_item(self, payload: dict, collection_key: str) -> dict:
+        """Tworzy pozycję z gotowego payloadu Zotero i dodaje do kolekcji."""
+        item = dict(payload)
+        item["collections"] = [collection_key]
+        # Puste pola nie powinny iść do API.
+        item = {k: v for k, v in item.items() if v not in ("", None, [], {})}
+
+        user_id = self.resolve_user_id()
+        create_response = self._session.post(
+            f"{ZOTERO_WEB_API_BASE}/users/{user_id}/items",
+            json=[item],
+            timeout=self.timeout,
+        )
+        if create_response.status_code not in (200, 201, 207):
+            raise ZoteroClientError(
+                f"Web API create item failed: HTTP {create_response.status_code} — "
+                f"{create_response.text[:500]}",
+                create_response.status_code,
+            )
+
+        item_key = self._extract_created_item_key(create_response)
+        if not item_key:
+            raise ZoteroClientError(
+                "Web API: utworzono pozycję, ale nie udało się odczytać klucza.",
+                create_response.status_code,
+            )
+
+        try:
+            create_body = create_response.json() if create_response.text else {}
+        except ValueError:
+            create_body = {"raw": create_response.text}
+
+        return {
+            "success": True,
+            "via": "web_api",
+            "key": item_key,
+            "itemKey": item_key,
+            "collection_key": collection_key,
+            "title": item.get("title", ""),
+            "result": create_body,
+        }
+
     def _extract_created_item_key(self, response: requests.Response) -> str:
         try:
             body = response.json()

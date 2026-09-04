@@ -588,3 +588,215 @@ class TestCollectionItemRemoveEndpoint:
             **auth_headers,
         )
         assert response.status_code == 404
+
+
+@pytest.mark.django_db
+class TestImportManualEndpoint:
+    @responses.activate
+    def test_requires_title(self, api_client, auth_headers):
+        response = api_client.post(
+            "/api/v1/import/manual",
+            data=json.dumps(
+                {
+                    "itemType": "preprint",
+                    "collection_key": COLLECTION_KEY,
+                }
+            ),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 400
+        assert "title" in response.json()["error"].lower()
+
+    @responses.activate
+    def test_rejects_unknown_item_type(self, api_client, auth_headers):
+        response = api_client.post(
+            "/api/v1/import/manual",
+            data=json.dumps(
+                {
+                    "itemType": "podcast",
+                    "title": "X",
+                    "collection_key": COLLECTION_KEY,
+                }
+            ),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 400
+        assert "itemtype" in response.json()["error"].lower()
+
+    @responses.activate
+    def test_rejects_unknown_fields(self, api_client, auth_headers):
+        response = api_client.post(
+            "/api/v1/import/manual",
+            data=json.dumps(
+                {
+                    "itemType": "book",
+                    "title": "Książka",
+                    "weirdField": "nope",
+                    "collection_key": COLLECTION_KEY,
+                }
+            ),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 400
+        assert "weirdfield" in response.json()["error"].lower()
+
+    @responses.activate
+    def test_creates_preprint_local(self, api_client, auth_headers):
+        from tests.helpers.zotero_mock import register_create_item, register_local_zotero_base
+
+        register_local_zotero_base(responses)
+        register_create_item(responses, new_key="MANUAL01")
+        response = api_client.post(
+            "/api/v1/import/manual",
+            data=json.dumps(
+                {
+                    "itemType": "preprint",
+                    "title": "Draft paper",
+                    "creators": [
+                        {"creatorType": "author", "firstName": "Jan", "lastName": "Kowalski"}
+                    ],
+                    "date": "2024",
+                    "url": "https://example.com/p",
+                    "collection_key": COLLECTION_KEY,
+                }
+            ),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["item_key"] == "MANUAL01"
+        assert data["itemType"] == "preprint"
+        assert data["title"] == "Draft paper"
+        assert data["source"] == "local"
+        # Sprawdź, że do Local API poszło POST z kolekcją w ścieżce.
+        posts = [c for c in responses.calls if c.request.method == "POST"]
+        assert posts
+        body = json.loads(posts[-1].request.body)
+        assert body[0]["itemType"] == "preprint"
+        assert body[0]["title"] == "Draft paper"
+        assert "collections" not in body[0]
+
+    @responses.activate
+    @override_settings(ZOTERO_WEB_API_KEY="web-test-key", ZOTERO_WEB_USER_ID="12345")
+    def test_creates_book_web(self, api_client, auth_headers):
+        from tests.helpers.zotero_mock import register_web_api
+
+        register_web_api(responses)
+        response = api_client.post(
+            "/api/v1/import/manual",
+            data=json.dumps(
+                {
+                    "itemType": "book",
+                    "title": "Historia X",
+                    "publisher": "PWN",
+                    "collection_key": COLLECTION_KEY,
+                }
+            ),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["item_key"] == "WEBNEW01"
+        assert data["source"] == "web"
+
+
+@pytest.mark.django_db
+class TestImportDescribeEndpoint:
+    def test_503_without_gemini_key(self, api_client, auth_headers, settings):
+        settings.GEMINI_API_KEY = ""
+        response = api_client.post(
+            "/api/v1/import/describe",
+            data=json.dumps({"item_type": "book", "text": "Tytuł: Foo"}),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 503
+        assert "gemini" in response.json()["error"].lower()
+
+    def test_requires_item_type(self, api_client, auth_headers, settings):
+        settings.GEMINI_API_KEY = "test-gemini-key"
+        response = api_client.post(
+            "/api/v1/import/describe",
+            data=json.dumps({"text": "coś"}),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 400
+
+    @responses.activate
+    def test_describe_mocked_gemini(self, api_client, auth_headers, settings):
+        settings.GEMINI_API_KEY = "test-gemini-key"
+        settings.GEMINI_MODEL = "gemini-2.0-flash-lite"
+        gemini_body = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "text": json.dumps(
+                                    {
+                                        "itemType": "book",
+                                        "title": "Historia X",
+                                        "creators": [
+                                            {
+                                                "creatorType": "author",
+                                                "firstName": "Anna",
+                                                "lastName": "Nowak",
+                                            }
+                                        ],
+                                        "publisher": "PWN",
+                                        "date": "2020",
+                                        "DOI": "",
+                                        "ISBN": "",
+                                        "url": "",
+                                    }
+                                )
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        responses.add(
+            responses.POST,
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            "gemini-2.0-flash-lite:generateContent",
+            json=gemini_body,
+            status=200,
+        )
+        response = api_client.post(
+            "/api/v1/import/describe",
+            data=json.dumps(
+                {
+                    "item_type": "book",
+                    "text": "Anna Nowak, Historia X, PWN 2020",
+                }
+            ),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["draft"]["itemType"] == "book"
+        assert data["draft"]["title"] == "Historia X"
+        assert "collections" not in data["draft"]
+        assert data["model"] == "gemini-2.0-flash-lite"
+
+    @responses.activate
+    def test_health_verbose_gemini_flag(self, api_client, settings):
+        settings.GEMINI_API_KEY = "x"
+        register_local_zotero_base(responses)
+        response = api_client.get("/api/v1/health?verbose=1")
+        assert response.status_code == 200
+        assert response.json().get("gemini_configured") is True
+
+        settings.GEMINI_API_KEY = ""
+        response = api_client.get("/api/v1/health?verbose=1")
+        assert response.json().get("gemini_configured") is False

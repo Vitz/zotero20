@@ -283,6 +283,23 @@ def register_create_collection(
     )
 
 
+def register_create_item(
+    rsps: responses.RequestsMock,
+    new_key: str = "MANUAL01",
+    base_url: str = DEFAULT_BASE,
+    collection_key: str = COLLECTION_KEY,
+) -> None:
+    rsps.add(
+        responses.POST,
+        f"{base_url}/api/users/0/collections/{collection_key}/items",
+        json={
+            "successful": {"0": {"key": new_key, "version": 1}},
+            "failed": {},
+        },
+        status=200,
+    )
+
+
 def register_add_item_by_id(
     rsps: responses.RequestsMock,
     new_key: str = "NEWITEM1",

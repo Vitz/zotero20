@@ -190,6 +190,9 @@ def _health_payload(verbose: bool = False) -> tuple[dict, bool]:
     if verbose:
         payload["verbose"] = True
         payload["web_api_configured"] = web_api_configured()
+        from .services.gemini import gemini_configured
+
+        payload["gemini_configured"] = gemini_configured()
         payload["styles_count"] = len(list_styles())
         payload["default_style"] = DEFAULT_STYLE_ID
     return payload, ok
@@ -473,6 +476,140 @@ def import_orcid(request):
     payload = report.to_dict()
     payload["collection_key"] = collection_key
     return JsonResponse(payload, status=status)
+
+
+@json_api
+def import_manual(request):
+    """Tworzy pozycję Zotero z ręcznego / Gemini-draft payloadu (bez Crossref)."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
+
+    body = parse_json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Nieprawidłowy JSON."}, status=400)
+
+    study = body.get("study", "")
+    collection_key_raw = body.get("collection_key", "")
+    if not study and not collection_key_raw:
+        return JsonResponse(
+            {"error": "Wymagane pole: collection_key lub study."},
+            status=400,
+        )
+
+    try:
+        collection_key, study = resolve_collection_key(
+            study=study,
+            collection_key=collection_key_raw,
+        )
+    except StudiesConfigError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    from .services.manual_item import ManualItemValidationError, validate_and_normalize_item
+
+    if isinstance(body.get("item"), dict):
+        item_payload = body["item"]
+    else:
+        item_payload = {
+            k: v
+            for k, v in body.items()
+            if k not in ("collection_key", "study", "item")
+        }
+    try:
+        item = validate_and_normalize_item(item_payload, collection_key=collection_key)
+    except ManualItemValidationError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+
+    doi = str(item.get("DOI") or "").strip()
+    client, source = get_zotero_client()
+    if doi:
+        normalized = normalize_doi(doi)
+        if normalized:
+            item["DOI"] = normalized
+            try:
+                existing = client.find_item_in_collection_by_doi(normalized, collection_key)
+                if existing:
+                    return JsonResponse(
+                        {
+                            "duplicate": True,
+                            "message": "Pozycja z tym DOI już jest w kolekcji",
+                            "doi": normalized,
+                            "collection_key": collection_key,
+                            "source": source,
+                            "item_key": existing.get("key", ""),
+                            "title": existing.get("title", ""),
+                            "citation_text": existing.get("citation_text", ""),
+                            "in_collection": True,
+                        }
+                    )
+            except ZoteroClientError:
+                pass
+
+    try:
+        result = client.create_item(item, collection_key)
+    except ZoteroClientError as exc:
+        return JsonResponse({"error": str(exc)}, status=502)
+
+    item_key = ""
+    if isinstance(result, dict):
+        item_key = result.get("key") or result.get("itemKey") or ""
+
+    response = {
+        "success": True,
+        "collection_key": collection_key,
+        "source": source,
+        "item_key": item_key,
+        "title": item.get("title", ""),
+        "itemType": item.get("itemType", ""),
+        "citation_text": "",
+        "result": result,
+    }
+    if study:
+        response["study"] = study
+    if item.get("DOI"):
+        response["doi"] = item["DOI"]
+    return JsonResponse(response)
+
+
+@json_api
+def import_describe(request):
+    """Gemini: tekst + item_type → draft JSON (bez zapisu do Zotero)."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
+
+    body = parse_json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Nieprawidłowy JSON."}, status=400)
+
+    item_type = str(body.get("item_type") or body.get("itemType") or "").strip()
+    text = str(body.get("text") or "")
+    if not item_type:
+        return JsonResponse({"error": "Wymagane pole: item_type."}, status=400)
+
+    from .services.gemini import GeminiError, describe_item_from_text, gemini_configured
+
+    if not gemini_configured():
+        return JsonResponse(
+            {
+                "error": (
+                    "Gemini nie jest skonfigurowane na serwerze "
+                    "(brak GEMINI_API_KEY). Wypełnij pola ręcznie."
+                )
+            },
+            status=503,
+        )
+
+    rate_key = request.META.get("REMOTE_ADDR") or "global"
+    try:
+        result = describe_item_from_text(
+            item_type=item_type,
+            text=text,
+            rate_key=rate_key,
+        )
+    except GeminiError as exc:
+        status = exc.status_code or 502
+        return JsonResponse({"error": str(exc)}, status=status)
+
+    return JsonResponse(result)
 
 
 @json_api

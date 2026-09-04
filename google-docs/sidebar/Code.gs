@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.1.6';
+const ADDON_VERSION = '2.2.0';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -157,6 +157,82 @@ function importOrcid(orcid, options, limit) {
     payload.collection_key = options.collectionKey;
   }
   return apiPost('/import/orcid', payload);
+}
+
+/**
+ * Ręczne utworzenie pozycji Zotero (zakładka Inne).
+ * payload: { itemType, title, creators, … } + options.collectionKey / study
+ */
+function importManual(itemPayload, options) {
+  var payload = {};
+  var src = itemPayload || {};
+  Object.keys(src).forEach(function (k) {
+    payload[k] = src[k];
+  });
+  if (options && options.study) {
+    payload.study = options.study;
+  } else if (options && options.collectionKey) {
+    payload.collection_key = options.collectionKey;
+  }
+  var result = apiPost('/import/manual', payload);
+  var itemKey = result.item_key || extractItemKey_(result.result || result);
+  var citationText = result.citation_text || '';
+  if (!citationText && itemKey) {
+    try {
+      citationText = getItemCitationText(itemKey, getBibliographyStyle());
+    } catch (e) {
+      citationText = '';
+    }
+  }
+  if (citationText && !result.duplicate && getCitationInsertMode() === 'placeholder') {
+    try {
+      replacePlaceholderInDocument_(
+        citationText,
+        buildIdentifiers_('doi', result.doi || ''),
+        itemKey
+      );
+      result.placeholder_replaced = true;
+    } catch (e) {
+      result.placeholder_error = e.message;
+    }
+  }
+  if (itemKey) {
+    rememberSessionItem_(result, itemKey, citationText);
+  }
+  result.item_key = itemKey || result.item_key || '';
+  result.citation_text = citationText;
+  return result;
+}
+
+/**
+ * Gemini: tekst → draft pól (bez zapisu do Zotero).
+ * Zwraca { draft, warnings, model } albo rzuca z komunikatem 503 gdy brak klucza.
+ */
+function describeManualItem(itemType, text) {
+  return apiPost('/import/describe', {
+    item_type: String(itemType || '').trim(),
+    text: String(text || ''),
+  });
+}
+
+/** Czy serwer ma GEMINI_API_KEY (health?verbose=1 — bez sekretu). */
+function getGeminiConfigured() {
+  try {
+    var response = UrlFetchApp.fetch(API_BASE + '/health?verbose=1', {
+      method: 'get',
+      muteHttpExceptions: true,
+      headers: { Accept: 'application/json' },
+    });
+    var body = {};
+    try {
+      body = JSON.parse(response.getContentText() || '{}');
+    } catch (ignore) {
+      body = {};
+    }
+    return !!body.gemini_configured;
+  } catch (e) {
+    return false;
+  }
 }
 
 function getCollectionItems(collectionKey, limit) {

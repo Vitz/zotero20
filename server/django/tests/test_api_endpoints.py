@@ -726,7 +726,7 @@ class TestImportDescribeEndpoint:
     def test_describe_with_body_gemini_key(self, api_client, auth_headers, settings):
         """Klucz w body.gemini_api_key działa bez env i bez nagłówka (fallback sidebara)."""
         settings.GEMINI_API_KEY = ""
-        settings.GEMINI_MODEL = "gemini-2.0-flash-lite"
+        settings.GEMINI_MODEL = "gemini-3.5-flash-lite"
         gemini_body = {
             "candidates": [
                 {
@@ -754,7 +754,7 @@ class TestImportDescribeEndpoint:
         responses.add(
             responses.POST,
             "https://generativelanguage.googleapis.com/v1beta/models/"
-            "gemini-2.0-flash-lite:generateContent",
+            "gemini-3.5-flash-lite:generateContent",
             json=gemini_body,
             status=200,
         )
@@ -788,7 +788,7 @@ class TestImportDescribeEndpoint:
     def test_describe_with_request_header_key(self, api_client, auth_headers, settings):
         """Klucz z X-Gemini-Api-Key działa bez GEMINI_API_KEY w env."""
         settings.GEMINI_API_KEY = ""
-        settings.GEMINI_MODEL = "gemini-2.0-flash-lite"
+        settings.GEMINI_MODEL = "gemini-3.5-flash-lite"
         gemini_body = {
             "candidates": [
                 {
@@ -816,7 +816,7 @@ class TestImportDescribeEndpoint:
         responses.add(
             responses.POST,
             "https://generativelanguage.googleapis.com/v1beta/models/"
-            "gemini-2.0-flash-lite:generateContent",
+            "gemini-3.5-flash-lite:generateContent",
             json=gemini_body,
             status=200,
         )
@@ -841,7 +841,7 @@ class TestImportDescribeEndpoint:
     @responses.activate
     def test_describe_mocked_gemini(self, api_client, auth_headers, settings):
         settings.GEMINI_API_KEY = "test-gemini-key"
-        settings.GEMINI_MODEL = "gemini-2.0-flash-lite"
+        settings.GEMINI_MODEL = "gemini-3.5-flash-lite"
         gemini_body = {
             "candidates": [
                 {
@@ -875,7 +875,7 @@ class TestImportDescribeEndpoint:
         responses.add(
             responses.POST,
             "https://generativelanguage.googleapis.com/v1beta/models/"
-            "gemini-2.0-flash-lite:generateContent",
+            "gemini-3.5-flash-lite:generateContent",
             json=gemini_body,
             status=200,
         )
@@ -895,7 +895,7 @@ class TestImportDescribeEndpoint:
         assert data["draft"]["itemType"] == "book"
         assert data["draft"]["title"] == "Historia X"
         assert "collections" not in data["draft"]
-        assert data["model"] == "gemini-2.0-flash-lite"
+        assert data["model"] == "gemini-3.5-flash-lite"
 
     @responses.activate
     def test_health_verbose_gemini_flag(self, api_client, settings):

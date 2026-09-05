@@ -18,7 +18,7 @@ from .manual_item import (
 logger = logging.getLogger(__name__)
 
 # Free-tier friendly; override via GEMINI_MODEL.
-DEFAULT_GEMINI_MODEL = "gemini-2.0-flash-lite"
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 MAX_TEXT_LENGTH = 12_000
 

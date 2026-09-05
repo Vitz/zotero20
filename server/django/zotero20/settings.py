@@ -139,9 +139,9 @@ ORCID_RATE_LIMIT_DELAY = float(os.environ.get("ORCID_RATE_LIMIT_DELAY", "0.35"))
 
 # Google Gemini — opcjonalny fallback env dla /import/describe.
 # Preferowany: klucz z sidebara (nagłówek X-Gemini-Api-Key / Script Properties).
-# Domyślny model: gemini-2.0-flash-lite (free-tier friendly).
+# Domyślny model: gemini-3.5-flash-lite (free-tier friendly).
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "").strip() or "gemini-2.0-flash-lite"
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "").strip() or "gemini-3.5-flash-lite"
 
 # Ścieżki proxowane do Zotero (Connector + Local API). Import Django: /api/v1/*
 ZOTERO_PROXY_PREFIXES = (

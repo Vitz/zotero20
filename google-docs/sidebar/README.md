@@ -1,7 +1,7 @@
 # Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
-Wersja plików Apps Script: **2.2.3** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+Wersja plików Apps Script: **2.2.4** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
 
 ## Co robi panel
 
@@ -71,9 +71,10 @@ to zabezpieczenie przed „naprawami, które nie działają, bo w Docs jest star
 
 Klucz Gemini zapisujesz w panelu: **Ustawienia → Klucz Gemini (AI Studio)**.
 Od **2.2.3** panel woła Gemini **bezpośrednio** z Apps Script (`UrlFetch` →
-`generativelanguage.googleapis.com`) — omija Django i Cloudflare. Utworzenie pozycji
-nadal idzie przez `POST /import/manual`. `GEMINI_API_KEY` w `.env` to tylko opcjonalny
-fallback serwerowy dla `/import/describe`.
+`generativelanguage.googleapis.com`) — omija Django i Cloudflare (od **2.2.4**
+domyślny model: `gemini-3.5-flash-lite`). Utworzenie pozycji nadal idzie przez
+`POST /import/manual`. `GEMINI_API_KEY` w `.env` to tylko opcjonalny fallback
+serwerowy dla `/import/describe`; opcjonalnie `GEMINI_MODEL` nadpisuje model.
 
 Ustawienia per dokument (Document Properties, ustawiane z panelu):
 `ZOTERO20_DEFAULT_COLLECTION_KEY`, `ZOTERO20_DEFAULT_COLLECTION_NAME`,
@@ -126,7 +127,7 @@ Panel pokazuje obie kropki statusu (API / Zotero) przy tytule i odświeża je co
 | `POST /citations` | cytowania w tekście **i** bibliografia dla listy `item_keys` (jeden styl + `locale`) |
 | `POST /bibliography` | bibliografia z `item_keys` albo z `collection_key` (tryb awaryjny) |
 | `POST /import/manual` | ręczne utworzenie pozycji (zakładka Inne) |
-| `POST /import/describe` | Gemini → draft (fallback serwerowy; preferowane: bezpośrednie Gemini z Apps Script 2.2.3+) |
+| `POST /import/describe` | Gemini → draft (fallback serwerowy; preferowane: bezpośrednie Gemini z Apps Script 2.2.4+) |
 
 ## Troubleshooting
 

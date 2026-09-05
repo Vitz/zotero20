@@ -552,7 +552,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.2.3';
+    var SIDEBAR_VERSION = '2.2.4';
 
     // UrlFetchApp ma limity dzienne — 3 s to kompromis vs prośba o 1 s.
     // Przy długim otwarciu sidebara rozważ później 5 s w ustawieniach.
@@ -781,7 +781,7 @@
       ) {
         return (
           'Błąd proxy (Cloudflare) zamiast odpowiedzi API. Odśwież panel i spróbuj ponownie. ' +
-          'Dla Gemini upewnij się, że masz wersję 2.2.3+ i klucz w Ustawieniach (wywołanie bezpośrednie do Google).'
+          'Dla Gemini upewnij się, że masz wersję 2.2.4+ i klucz w Ustawieniach (wywołanie bezpośrednie do Google).'
         );
       }
       if (msg.length > 420) {

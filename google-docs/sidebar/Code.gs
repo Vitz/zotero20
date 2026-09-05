@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.2.3';
+const ADDON_VERSION = '2.2.4';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -18,7 +18,7 @@ const PROP_DEBUG = 'ZOTERO20_DEBUG';
 const PROP_GEMINI_API_KEY = 'ZOTERO20_GEMINI_API_KEY';
 // Gemini REST — wywołanie z Apps Script (UrlFetch), bez Django/Cloudflare.
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-const GEMINI_DEFAULT_MODEL = 'gemini-2.0-flash-lite';
+const GEMINI_DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 const GEMINI_MAX_TEXT_LENGTH = 12000;
 const GEMINI_SYSTEM_PROMPT =
   'Jesteś asystentem bibliograficznym. Na podstawie podanego tekstu wypełnij ' +

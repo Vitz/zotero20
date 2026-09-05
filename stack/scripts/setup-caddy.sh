@@ -42,8 +42,11 @@ ${DOMAIN} {
 		X-Zotero20-Origin "${ORIGIN_ID}"
 		-Server
 	}
+	# Timeouty > Cloudflare Free (~100s proxy) — CF i tak urwie wcześniej (524).
+	# 3m chroni lokalny Caddy→Django przy długim citing; Gemini describe cap=45s.
 	reverse_proxy ${UPSTREAM} {
 		transport http {
+			dial_timeout 10s
 			read_timeout 3m
 			write_timeout 3m
 			response_header_timeout 3m

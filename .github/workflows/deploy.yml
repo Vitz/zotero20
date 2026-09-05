@@ -109,6 +109,7 @@ jobs:
             fi
             set_env ZOTERO20_HOST_PORT "8089"
             set_env GUNICORN_WORKERS "1"
+            set_env GUNICORN_THREADS "2"
             set_env GUNICORN_TIMEOUT "180"
             set_env ZOTERO_PROXY_DOCUMENT_TIMEOUT "180"
             set_env DJANGO_ALLOWED_HOSTS "zotero.keyweb.pl,localhost,127.0.0.1"

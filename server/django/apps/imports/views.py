@@ -585,14 +585,20 @@ def import_describe(request):
     if not item_type:
         return JsonResponse({"error": "Wymagane pole: item_type."}, status=400)
 
-    from .services.gemini import GeminiError, describe_item_from_text, gemini_configured
+    from .services.gemini import GeminiError, describe_item_from_text, resolve_gemini_api_key
 
-    if not gemini_configured():
+    # Preferuj nagłówek (nie ląduje w body / typowych logach debug JSON).
+    request_key = (request.headers.get("X-Gemini-Api-Key") or "").strip()
+    if not request_key:
+        request_key = str(body.get("gemini_api_key") or "").strip()
+
+    if not resolve_gemini_api_key(request_key):
         return JsonResponse(
             {
                 "error": (
-                    "Gemini nie jest skonfigurowane na serwerze "
-                    "(brak GEMINI_API_KEY). Wypełnij pola ręcznie."
+                    "Gemini nie jest skonfigurowane "
+                    "(brak X-Gemini-Api-Key w żądaniu i GEMINI_API_KEY na serwerze). "
+                    "Wklej klucz w Ustawieniach panelu albo wypełnij pola ręcznie."
                 )
             },
             status=503,
@@ -604,6 +610,7 @@ def import_describe(request):
             item_type=item_type,
             text=text,
             rate_key=rate_key,
+            api_key=request_key or None,
         )
     except GeminiError as exc:
         status = exc.status_code or 502

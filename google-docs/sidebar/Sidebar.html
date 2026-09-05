@@ -328,7 +328,8 @@
       <summary>Uzupełnij z tekstu (Gemini)</summary>
       <p class="hint" style="font-size:11px;color:#555;margin-top:6px;">
         Wklej abstrakt, opis albo cytowanie. Model wypełni pola poniżej — sprawdź je przed utworzeniem.
-        Tekst trafia do Google Gemini (klucz tylko na serwerze).
+        Tekst trafia do Google Gemini. Klucz API ustawiasz w zakładce <strong>Ustawienia</strong>
+        (Script Properties projektu Apps Script — nie w .env na VPS).
       </p>
       <label for="inne-gemini-text">Tekst źródłowy</label>
       <textarea id="inne-gemini-text" rows="5" placeholder="Wklej opis, abstrakt, cytowanie…" style="width:100%;box-sizing:border-box;"></textarea>
@@ -488,6 +489,21 @@
       albo <strong>Zmień styl</strong> w zakładce Cytowania.
     </p>
 
+    <h3 style="margin:16px 0 6px;font-size:13px;">Klucz Gemini (AI Studio)</h3>
+    <p class="hint" style="font-size:11px;color:#555;margin:0 0 8px;">
+      Wklej klucz z
+      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>.
+      Zapis trafia do <strong>Script Properties</strong> tego projektu Apps Script
+      (nie do repozytorium i nie wymaga <code>GEMINI_API_KEY</code> na VPS).
+    </p>
+    <label for="gemini-api-key">Klucz API Gemini</label>
+    <input id="gemini-api-key" type="password" autocomplete="off" spellcheck="false"
+      placeholder="Wklej klucz albo zostaw puste, by usunąć">
+    <button id="btn-save-gemini-key" type="button" onclick="saveGeminiApiKeyFromSettings()">
+      Zapisz klucz Gemini
+    </button>
+    <p id="gemini-key-status" class="hint" style="font-size:11px;color:#555;margin-top:6px;"></p>
+
     <h3 style="margin:16px 0 6px;font-size:13px;">Tryb diagnostyczny</h3>
     <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin-top:4px;">
       <input id="debug-mode" type="checkbox" onchange="persistDebugMode()">
@@ -536,7 +552,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.2.0';
+    var SIDEBAR_VERSION = '2.2.1';
 
     // UrlFetchApp ma limity dzienne — 3 s to kompromis vs prośba o 1 s.
     // Przy długim otwarciu sidebara rozważ później 5 s w ustawieniach.
@@ -722,7 +738,10 @@
     function showTab(name) {
       document.querySelectorAll('.tab').forEach(function (el) { el.classList.remove('active'); });
       document.getElementById('tab-' + name).classList.add('active');
-      if (name === 'settings') loadStatus();
+      if (name === 'settings') {
+        loadStatus();
+        loadGeminiKeyStatus();
+      }
       if (name === 'kolekcja') loadKolekcjaTab();
       if (name === 'inne') {
         ensureInneFormBuilt();
@@ -2333,22 +2352,23 @@
       var note = document.getElementById('inne-gemini-note');
       if (inneGeminiConfigured === true) {
         btn.disabled = false;
-        note.textContent = 'Gemini dostępne na serwerze.';
+        note.textContent = 'Gemini gotowe (klucz z Ustawień lub serwera).';
         return;
       }
       if (inneGeminiConfigured === false) {
         btn.disabled = true;
-        note.textContent = 'Brak GEMINI_API_KEY na serwerze — wypełnij pola ręcznie.';
+        note.textContent =
+          'Brak klucza Gemini — wklej go w Ustawieniach (AI Studio) albo wypełnij pola ręcznie.';
         return;
       }
       note.textContent = 'Sprawdzam dostępność Gemini…';
       google.script.run
         .withSuccessHandler(function (ok) {
           inneGeminiConfigured = !!ok;
-          btn.disabled = !ok || !appState.defaultCollection.key;
+          btn.disabled = !ok;
           note.textContent = ok
-            ? 'Gemini dostępne na serwerze.'
-            : 'Brak GEMINI_API_KEY na serwerze — wypełnij pola ręcznie.';
+            ? 'Gemini gotowe (klucz z Ustawień lub serwera).'
+            : 'Brak klucza Gemini — wklej go w Ustawieniach (AI Studio) albo wypełnij pola ręcznie.';
         })
         .withFailureHandler(function () {
           inneGeminiConfigured = false;
@@ -2356,6 +2376,65 @@
           note.textContent = 'Nie udało się sprawdzić Gemini — wypełnij pola ręcznie.';
         })
         .getGeminiConfigured();
+    }
+
+    function loadGeminiKeyStatus() {
+      var statusEl = document.getElementById('gemini-key-status');
+      if (!statusEl) return;
+      google.script.run
+        .withSuccessHandler(function (configured) {
+          configured = !!configured;
+          if (configured) {
+            inneGeminiConfigured = true;
+          }
+          statusEl.textContent = configured
+            ? 'Klucz zapisany w Script Properties tego projektu.'
+            : 'Brak zapisanego klucza — Gemini w zakładce Inne będzie niedostępne (chyba że serwer ma własny klucz).';
+          if (configured) {
+            var input = document.getElementById('gemini-api-key');
+            if (input && !input.value) {
+              input.placeholder = '•••••••• (zapisany — wklej nowy, by zmienić)';
+            }
+          }
+        })
+        .withFailureHandler(function () {
+          statusEl.textContent = 'Nie udało się odczytać statusu klucza Gemini.';
+        })
+        .hasGeminiApiKey();
+    }
+
+    function saveGeminiApiKeyFromSettings() {
+      var input = document.getElementById('gemini-api-key');
+      var key = (input && input.value) || '';
+      var statusEl = document.getElementById('gemini-key-status');
+      setStatus('Zapisuję klucz Gemini…');
+      google.script.run
+        .withSuccessHandler(function (r) {
+          var configured = !!(r && r.configured);
+          inneGeminiConfigured = configured;
+          if (input) {
+            input.value = '';
+            input.placeholder = configured
+              ? '•••••••• (zapisany — wklej nowy, by zmienić)'
+              : 'Wklej klucz albo zostaw puste, by usunąć';
+          }
+          if (statusEl) {
+            statusEl.textContent = configured
+              ? 'Klucz zapisany w Script Properties tego projektu.'
+              : 'Klucz usunięty z Script Properties.';
+          }
+          setStatus(
+            configured
+              ? 'Zapisano klucz Gemini (Script Properties).'
+              : 'Usunięto klucz Gemini.',
+            false
+          );
+          refreshInneGeminiAvailability();
+        })
+        .withFailureHandler(function (e) {
+          setStatus(formatScriptError(e), true);
+        })
+        .saveGeminiApiKey(key);
     }
 
     function doInneDescribe() {
@@ -2380,11 +2459,11 @@
         })
         .withFailureHandler(function (e) {
           var msg = formatScriptError(e);
-          if (/503|GEMINI_API_KEY|nie jest skonfigurowane/i.test(msg)) {
+          if (/503|GEMINI_API_KEY|nie jest skonfigurowane|brak klucza/i.test(msg)) {
             inneGeminiConfigured = false;
             document.getElementById('btn-inne-gemini').disabled = true;
             document.getElementById('inne-gemini-note').textContent =
-              'Brak GEMINI_API_KEY na serwerze — wypełnij pola ręcznie.';
+              'Brak klucza Gemini — wklej go w Ustawieniach (AI Studio) albo wypełnij pola ręcznie.';
           } else {
             document.getElementById('btn-inne-gemini').disabled = !inneGeminiConfigured;
           }
@@ -2559,6 +2638,7 @@
       loadCitationSummary();
       loadStudyOverview();
       loadDebugMode();
+      loadGeminiKeyStatus();
       setStatus('Wybierz kolekcję tego dokumentu w zakładce Ustawienia.');
     }
 

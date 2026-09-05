@@ -731,6 +731,60 @@ class TestImportDescribeEndpoint:
         assert response.status_code == 400
 
     @responses.activate
+    def test_describe_with_request_header_key(self, api_client, auth_headers, settings):
+        """Klucz z X-Gemini-Api-Key działa bez GEMINI_API_KEY w env."""
+        settings.GEMINI_API_KEY = ""
+        settings.GEMINI_MODEL = "gemini-2.0-flash-lite"
+        gemini_body = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "text": json.dumps(
+                                    {
+                                        "itemType": "book",
+                                        "title": "Z nagłówka",
+                                        "creators": [],
+                                        "publisher": "",
+                                        "date": "",
+                                        "DOI": "",
+                                        "ISBN": "",
+                                        "url": "",
+                                    }
+                                )
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        responses.add(
+            responses.POST,
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            "gemini-2.0-flash-lite:generateContent",
+            json=gemini_body,
+            status=200,
+        )
+        headers = {**auth_headers, "HTTP_X_GEMINI_API_KEY": "sidebar-gemini-key"}
+        response = api_client.post(
+            "/api/v1/import/describe",
+            data=json.dumps(
+                {
+                    "item_type": "book",
+                    "text": "Tytuł: Z nagłówka",
+                }
+            ),
+            content_type="application/json",
+            **headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["draft"]["title"] == "Z nagłówka"
+        assert responses.calls
+        # Klucz z nagłówka trafia do Gemini jako query param — nie logujemy go.
+        assert "sidebar-gemini-key" in (responses.calls[0].request.url or "")
+
+    @responses.activate
     def test_describe_mocked_gemini(self, api_client, auth_headers, settings):
         settings.GEMINI_API_KEY = "test-gemini-key"
         settings.GEMINI_MODEL = "gemini-2.0-flash-lite"

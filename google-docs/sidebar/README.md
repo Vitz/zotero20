@@ -1,12 +1,12 @@
 # Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
-Wersja plików Apps Script: **2.2.0** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+Wersja plików Apps Script: **2.2.1** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
 
 ## Co robi panel
 
 **Import** — dodaje pozycje do biblioteki Zotero na serwerze (DOI / ORCID / ręczne „Inne” → kolekcja).
-Opcjonalnie Gemini (klucz tylko na serwerze) uzupełnia pola z wklejonego tekstu.
+Opcjonalnie Gemini (klucz w Ustawieniach panelu / Script Properties) uzupełnia pola z wklejonego tekstu.
 
 **Śledzone cytowania w tekście** — wstawia cytowanie w miejscu kursora (albo zamiast `[*]`) i oznacza je
 ukrytą kotwicą-linkiem `https://zotero.keyweb.pl/cite/<ITEMKEY>?c=<id>&t=<tytuł>`.
@@ -66,7 +66,12 @@ to zabezpieczenie przed „naprawami, które nie działają, bo w Docs jest star
 | Klucz | Wartość |
 |-------|---------|
 | `ZOTERO20_API_KEY` | klucz z `server/.env` (wymagany) |
+| `ZOTERO20_GEMINI_API_KEY` | klucz Google AI Studio (opcjonalny; Ustawienia panelu) |
 | `ZOTERO20_DEBUG` | opcjonalnie `true` — tryb diagnostyczny |
+
+Klucz Gemini zapisujesz w panelu: **Ustawienia → Klucz Gemini (AI Studio)**.
+Trafia do Script Properties tego projektu Apps Script — nie do repo i nie wymaga
+`GEMINI_API_KEY` na VPS (`GEMINI_API_KEY` w `.env` to tylko opcjonalny fallback serwerowy).
 
 Ustawienia per dokument (Document Properties, ustawiane z panelu):
 `ZOTERO20_DEFAULT_COLLECTION_KEY`, `ZOTERO20_DEFAULT_COLLECTION_NAME`,
@@ -80,8 +85,9 @@ przy pierwszym odczycie w danym dokumencie wartość z Script Properties jest ko
 ## Użycie
 
 1. **W każdym dokumencie:** zakładka **Ustawienia** → wybierz kolekcję tego dokumentu → **Zapisz**
-   (albo **Utwórz kolekcję**). Tam też ustaw **Język cytowań** (English = *et al.*, Polski = *i in.*)
-   oraz **Wygląd bibliografii** (czcionka / rozmiar). Panel zostaje po polsku.
+   (albo **Utwórz kolekcję**). Tam też ustaw **Język cytowań** (English = *et al.*, Polski = *i in.*),
+   **Wygląd bibliografii** (czcionka / rozmiar) oraz opcjonalnie **Klucz Gemini (AI Studio)**
+   do uzupełniania pól w zakładce Inne. Panel zostaje po polsku.
 2. Zakładka **Cytowania** → wybierz styl CSL i tryb wstawiania (kursor / `[*]`).
 3. Zakładka **DOI** → zaimportuj pracę. Zakładka **Inne** → książka / preprint / rozdział (ręcznie lub Gemini).
 4. Ustaw kursor w dokumencie → **Wstaw cytowanie**. Cytowanie zostaje kotwicą.
@@ -118,7 +124,7 @@ Panel pokazuje obie kropki statusu (API / Zotero) przy tytule i odświeża je co
 | `POST /citations` | cytowania w tekście **i** bibliografia dla listy `item_keys` (jeden styl + `locale`) |
 | `POST /bibliography` | bibliografia z `item_keys` albo z `collection_key` (tryb awaryjny) |
 | `POST /import/manual` | ręczne utworzenie pozycji (zakładka Inne) |
-| `POST /import/describe` | Gemini → draft pól (bez zapisu; wymaga `GEMINI_API_KEY` na serwerze) |
+| `POST /import/describe` | Gemini → draft pól (bez zapisu; klucz: nagłówek `X-Gemini-Api-Key` z Ustawień albo opcjonalny `GEMINI_API_KEY` na serwerze) |
 
 ## Troubleshooting
 

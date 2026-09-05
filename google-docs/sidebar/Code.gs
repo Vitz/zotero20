@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.2.0';
+const ADDON_VERSION = '2.2.1';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -15,6 +15,7 @@ const PROP_BIBLIOGRAPHY_FONT_SIZE = 'ZOTERO20_BIBLIOGRAPHY_FONT_SIZE';
 const PROP_CITATION_INSERT_MODE = 'ZOTERO20_CITATION_INSERT_MODE';
 const PROP_CITATION_LOCALE = 'ZOTERO20_CITATION_LOCALE';
 const PROP_DEBUG = 'ZOTERO20_DEBUG';
+const PROP_GEMINI_API_KEY = 'ZOTERO20_GEMINI_API_KEY';
 const NAMED_RANGE_BIBLIOGRAPHY = 'ZOTERO20_BIBLIOGRAPHY';
 const BIBLIOGRAPHY_HEADING = 'Bibliografia';
 const BIBLIOGRAPHY_ALLOWED_FONTS = {
@@ -206,17 +207,80 @@ function importManual(itemPayload, options) {
 
 /**
  * Gemini: tekst → draft pól (bez zapisu do Zotero).
+ * Klucz z Script Properties idzie w nagłówku X-Gemini-Api-Key (nie w body / lastImport).
  * Zwraca { draft, warnings, model } albo rzuca z komunikatem 503 gdy brak klucza.
  */
 function describeManualItem(itemType, text) {
-  return apiPost('/import/describe', {
-    item_type: String(itemType || '').trim(),
-    text: String(text || ''),
+  var path = '/import/describe';
+  if (getDebugMode()) {
+    path += '?debug=1';
+  }
+  var headers = apiHeaders_();
+  var geminiKey = getGeminiApiKey();
+  if (geminiKey) {
+    headers['X-Gemini-Api-Key'] = geminiKey;
+  }
+  var response = UrlFetchApp.fetch(API_BASE + path, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({
+      item_type: String(itemType || '').trim(),
+      text: String(text || ''),
+    }),
+    muteHttpExceptions: true,
+    headers: headers,
   });
+  var parsed = parseResponse_(response);
+  // Nie zapisuj pełnego lastImport z tekstem źródłowym — tylko ścieżka i skrót wyniku.
+  PropertiesService.getDocumentProperties().setProperty(
+    'lastImport',
+    JSON.stringify({
+      at: new Date().toISOString(),
+      path: path,
+      result: {
+        model: parsed && parsed.model,
+        warnings: parsed && parsed.warnings,
+        draft_title: parsed && parsed.draft && parsed.draft.title,
+      },
+    })
+  );
+  return parsed;
 }
 
-/** Czy serwer ma GEMINI_API_KEY (health?verbose=1 — bez sekretu). */
+/** Klucz Gemini z Script Properties (pusty string jeśli brak). Tylko do wywołań serwerowych. */
+function getGeminiApiKey() {
+  var key = PropertiesService.getScriptProperties().getProperty(PROP_GEMINI_API_KEY);
+  return key ? String(key).trim() : '';
+}
+
+/** Czy Script Properties ma klucz Gemini (bez ujawniania wartości do HTML). */
+function hasGeminiApiKey() {
+  return !!getGeminiApiKey();
+}
+
+/**
+ * Zapisuje klucz Gemini w Script Properties (per projekt Apps Script).
+ * Pusty string usuwa klucz. Nigdy nie commituj klucza do repo.
+ */
+function saveGeminiApiKey(key) {
+  key = String(key || '').trim();
+  var props = PropertiesService.getScriptProperties();
+  if (!key) {
+    props.deleteProperty(PROP_GEMINI_API_KEY);
+    return { configured: false };
+  }
+  props.setProperty(PROP_GEMINI_API_KEY, key);
+  return { configured: true };
+}
+
+/**
+ * Czy Gemini jest dostępne: klucz w Script Properties (Ustawienia)
+ * albo opcjonalny GEMINI_API_KEY na serwerze (health?verbose=1).
+ */
 function getGeminiConfigured() {
+  if (getGeminiApiKey()) {
+    return true;
+  }
   try {
     var response = UrlFetchApp.fetch(API_BASE + '/health?verbose=1', {
       method: 'get',

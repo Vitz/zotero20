@@ -137,7 +137,8 @@ API_KEY = os.environ.get("ZOTERO20_API_KEY", "")
 ORCID_PUBLIC_API = "https://pub.orcid.org/v3.0"
 ORCID_RATE_LIMIT_DELAY = float(os.environ.get("ORCID_RATE_LIMIT_DELAY", "0.35"))
 
-# Google Gemini — uzupełnianie pól zakładki „Inne” (klucz tylko na serwerze).
+# Google Gemini — opcjonalny fallback env dla /import/describe.
+# Preferowany: klucz z sidebara (nagłówek X-Gemini-Api-Key / Script Properties).
 # Domyślny model: gemini-2.0-flash-lite (free-tier friendly).
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "").strip() or "gemini-2.0-flash-lite"

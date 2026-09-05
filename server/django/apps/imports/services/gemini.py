@@ -43,8 +43,20 @@ class GeminiError(Exception):
         self.status_code = status_code
 
 
-def gemini_configured() -> bool:
-    return bool(getattr(settings, "GEMINI_API_KEY", "") or "")
+def gemini_configured(api_key: str | None = None) -> bool:
+    """True jeśli jest klucz z żądania albo opcjonalny GEMINI_API_KEY w env."""
+    return bool(resolve_gemini_api_key(api_key))
+
+
+def resolve_gemini_api_key(api_key: str | None = None) -> str:
+    """
+    Preferuj klucz z żądania (sidebar / X-Gemini-Api-Key), inaczej env.
+    Nie loguj wartości klucza.
+    """
+    candidate = (api_key or "").strip()
+    if candidate:
+        return candidate
+    return (getattr(settings, "GEMINI_API_KEY", "") or "").strip()
 
 
 def get_gemini_model() -> str:
@@ -69,14 +81,17 @@ def describe_item_from_text(
     item_type: str,
     text: str,
     rate_key: str = "global",
+    api_key: str | None = None,
 ) -> dict[str, Any]:
     """
     Wywołuje Gemini → draft JSON (bez zapisu do Zotero).
     Zwraca {"draft": {...}, "warnings": [...], "model": "..."}.
+    api_key: opcjonalny klucz z nagłówka/body; inaczej settings.GEMINI_API_KEY.
     """
-    if not gemini_configured():
+    resolved_key = resolve_gemini_api_key(api_key)
+    if not resolved_key:
         raise GeminiError(
-            "Gemini nie jest skonfigurowane (brak GEMINI_API_KEY na serwerze).",
+            "Gemini nie jest skonfigurowane (brak klucza w żądaniu i GEMINI_API_KEY na serwerze).",
             status_code=503,
         )
 
@@ -97,7 +112,6 @@ def describe_item_from_text(
     _check_rate_limit(rate_key or "global")
 
     model = get_gemini_model()
-    api_key = settings.GEMINI_API_KEY
     url = f"{GEMINI_API_BASE}/models/{model}:generateContent"
 
     user_prompt = (
@@ -119,7 +133,7 @@ def describe_item_from_text(
     try:
         response = requests.post(
             url,
-            params={"key": api_key},
+            params={"key": resolved_key},
             json=body,
             timeout=60,
         )

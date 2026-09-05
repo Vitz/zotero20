@@ -328,8 +328,8 @@
       <summary>Uzupełnij z tekstu (Gemini)</summary>
       <p class="hint" style="font-size:11px;color:#555;margin-top:6px;">
         Wklej abstrakt, opis albo cytowanie. Model wypełni pola poniżej — sprawdź je przed utworzeniem.
-        Tekst trafia do Google Gemini. Klucz API ustawiasz w zakładce <strong>Ustawienia</strong>
-        (Script Properties projektu Apps Script — nie w .env na VPS).
+        Przy kluczu w <strong>Ustawieniach</strong> zapytanie idzie <em>bezpośrednio</em> do Google Gemini
+        (nie przez VPS / Cloudflare). Utworzenie pozycji nadal przez serwer.
       </p>
       <label for="inne-gemini-text">Tekst źródłowy</label>
       <textarea id="inne-gemini-text" rows="5" placeholder="Wklej opis, abstrakt, cytowanie…" style="width:100%;box-sizing:border-box;"></textarea>
@@ -552,7 +552,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.2.2';
+    var SIDEBAR_VERSION = '2.2.3';
 
     // UrlFetchApp ma limity dzienne — 3 s to kompromis vs prośba o 1 s.
     // Przy długim otwarciu sidebara rozważ później 5 s w ustawieniach.
@@ -760,14 +760,34 @@
 
     function formatScriptError(err) {
       if (!err) return 'Nieznany błąd.';
-      if (typeof err === 'string') return err;
-      if (err.message) return String(err.message);
-      if (err.stack && appState.debugMode) return String(err.stack);
-      try {
-        return JSON.stringify(err);
-      } catch (ignore) {
-        return String(err);
+      var msg = '';
+      if (typeof err === 'string') msg = err;
+      else if (err.message) msg = String(err.message);
+      else if (err.stack && appState.debugMode) msg = String(err.stack);
+      else {
+        try {
+          msg = JSON.stringify(err);
+        } catch (ignore) {
+          msg = String(err);
+        }
       }
+      var lower = msg.toLowerCase();
+      if (
+        lower.indexOf('cloudflare') >= 0 ||
+        lower.indexOf('origin web server') >= 0 ||
+        lower.indexOf('cf-error') >= 0 ||
+        msg.indexOf('<!DOCTYPE') >= 0 ||
+        msg.indexOf('<html') >= 0
+      ) {
+        return (
+          'Błąd proxy (Cloudflare) zamiast odpowiedzi API. Odśwież panel i spróbuj ponownie. ' +
+          'Dla Gemini upewnij się, że masz wersję 2.2.3+ i klucz w Ustawieniach (wywołanie bezpośrednie do Google).'
+        );
+      }
+      if (msg.length > 420) {
+        msg = msg.substring(0, 420) + '…';
+      }
+      return msg;
     }
 
     function persistDebugMode() {
@@ -2352,7 +2372,7 @@
       var note = document.getElementById('inne-gemini-note');
       if (inneGeminiConfigured === true) {
         btn.disabled = false;
-        note.textContent = 'Gemini gotowe (klucz z Ustawień lub serwera).';
+        note.textContent = 'Gemini gotowe (klucz z Ustawień → bezpośrednie wywołanie).';
         return;
       }
       if (inneGeminiConfigured === false) {
@@ -2367,7 +2387,7 @@
           inneGeminiConfigured = !!ok;
           btn.disabled = !ok;
           note.textContent = ok
-            ? 'Gemini gotowe (klucz z Ustawień lub serwera).'
+            ? 'Gemini gotowe (klucz z Ustawień → bezpośrednie wywołanie).'
             : 'Brak klucza Gemini — ustaw w Ustawieniach albo wypełnij pola ręcznie.';
         })
         .withFailureHandler(function () {

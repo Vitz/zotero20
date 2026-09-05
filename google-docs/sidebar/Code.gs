@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.2.2';
+const ADDON_VERSION = '2.2.3';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -16,6 +16,68 @@ const PROP_CITATION_INSERT_MODE = 'ZOTERO20_CITATION_INSERT_MODE';
 const PROP_CITATION_LOCALE = 'ZOTERO20_CITATION_LOCALE';
 const PROP_DEBUG = 'ZOTERO20_DEBUG';
 const PROP_GEMINI_API_KEY = 'ZOTERO20_GEMINI_API_KEY';
+// Gemini REST — wywołanie z Apps Script (UrlFetch), bez Django/Cloudflare.
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+const GEMINI_DEFAULT_MODEL = 'gemini-2.0-flash-lite';
+const GEMINI_MAX_TEXT_LENGTH = 12000;
+const GEMINI_SYSTEM_PROMPT =
+  'Jesteś asystentem bibliograficznym. Na podstawie podanego tekstu wypełnij ' +
+  'metadane pozycji w formacie Zotero (JSON). ' +
+  'Wypełniaj TYLKO pola, które wynikają wprost z tekstu. ' +
+  'NIE wymyślaj DOI, ISBN ani URL — jeśli nie ma ich w tekście, zostaw puste. ' +
+  'Nie zmieniaj itemType na inny niż podany. ' +
+  'Nieznane wartości = pusty string. Autorów rozbij na firstName/lastName gdy to możliwe.';
+const MANUAL_ITEM_TYPE_FIELDS = {
+  preprint: ['repository', 'archiveID', 'archive', 'libraryCatalog', 'callNumber'],
+  journalArticle: [
+    'publicationTitle',
+    'volume',
+    'issue',
+    'pages',
+    'series',
+    'seriesTitle',
+    'seriesText',
+    'journalAbbreviation',
+    'ISSN',
+  ],
+  book: [
+    'publisher',
+    'place',
+    'ISBN',
+    'numPages',
+    'edition',
+    'volume',
+    'series',
+    'seriesNumber',
+  ],
+  bookSection: [
+    'bookTitle',
+    'publisher',
+    'place',
+    'ISBN',
+    'pages',
+    'edition',
+    'series',
+    'seriesNumber',
+    'volume',
+  ],
+  thesis: ['university', 'place', 'thesisType', 'numPages'],
+  report: ['institution', 'reportNumber', 'place', 'pages', 'seriesTitle', 'seriesNumber'],
+  webpage: ['websiteTitle', 'websiteType'],
+};
+const MANUAL_COMMON_FIELDS = [
+  'title',
+  'creators',
+  'date',
+  'url',
+  'abstractNote',
+  'language',
+  'extra',
+  'DOI',
+  'accessDate',
+  'rights',
+  'shortTitle',
+];
 const NAMED_RANGE_BIBLIOGRAPHY = 'ZOTERO20_BIBLIOGRAPHY';
 const BIBLIOGRAPHY_HEADING = 'Bibliografia';
 const BIBLIOGRAPHY_ALLOWED_FONTS = {
@@ -207,23 +269,157 @@ function importManual(itemPayload, options) {
 
 /**
  * Gemini: tekst → draft pól (bez zapisu do Zotero).
- * Klucz z Script Properties: nagłówek X-Gemini-Api-Key + body.gemini_api_key
- * (body = fallback gdy proxy obcina niestandardowe nagłówki; lastImport bez sekretu).
- * Zwraca { draft, warnings, model } albo rzuca z komunikatem 503 gdy brak klucza.
+ * Preferencja: bezpośredni UrlFetch do generativelanguage.googleapis.com
+ * (omija Django/Cloudflare — CF Free ~100s i UrlFetch ~60s).
+ * Fallback: POST /import/describe gdy brak klucza w Script Properties
+ * albo gdy bezpośrednie wywołanie padnie sieciowo.
+ * Zwraca { draft, warnings, model }.
  */
 function describeManualItem(itemType, text) {
+  var geminiKey = getGeminiApiKey();
+  if (geminiKey) {
+    try {
+      var direct = describeWithGemini_(itemType, text, geminiKey);
+      rememberDescribeResult_('gemini-direct', direct, true);
+      return direct;
+    } catch (directErr) {
+      // Błędny klucz / walidacja — nie ma sensu iść na VPS z tym samym kluczem.
+      var directMsg = String((directErr && directErr.message) || directErr || '');
+      if (/brak klucza|za długi|wymagane pole|nieobsługiwany itemtype|http 40[013]/i.test(directMsg)) {
+        throw directErr;
+      }
+      try {
+        var viaServer = describeManualItemViaServer_(itemType, text, geminiKey);
+        rememberDescribeResult_('gemini-server-fallback', viaServer, true);
+        return viaServer;
+      } catch (serverErr) {
+        // Preferuj komunikat z bezpośredniego Gemini (bez HTML Cloudflare).
+        throw directErr;
+      }
+    }
+  }
+  // Brak klucza w panelu — spróbuj opcjonalnego GEMINI_API_KEY na serwerze.
+  var serverOnly = describeManualItemViaServer_(itemType, text, '');
+  rememberDescribeResult_('gemini-server', serverOnly, false);
+  return serverOnly;
+}
+
+/**
+ * Bezpośrednie wywołanie Gemini REST (Apps Script → Google).
+ * Klucz z Script Properties — nigdy nie loguj wartości.
+ */
+function describeWithGemini_(itemType, text, apiKey) {
+  itemType = String(itemType || '').trim();
+  text = String(text || '').trim();
+  apiKey = String(apiKey || '').trim();
+  if (!apiKey) {
+    throw new Error('Brak klucza Gemini — ustaw w Ustawieniach');
+  }
+  if (!text) {
+    throw new Error('Wymagane pole: text.');
+  }
+  if (text.length > GEMINI_MAX_TEXT_LENGTH) {
+    throw new Error('Tekst jest za długi (max ' + GEMINI_MAX_TEXT_LENGTH + ' znaków).');
+  }
+  if (!MANUAL_ITEM_TYPE_FIELDS[itemType]) {
+    throw new Error('Nieobsługiwany itemType: ' + (itemType || '(brak)') + '.');
+  }
+
+  var model = GEMINI_DEFAULT_MODEL;
+  var url =
+    GEMINI_API_BASE +
+    '/models/' +
+    encodeURIComponent(model) +
+    ':generateContent?key=' +
+    encodeURIComponent(apiKey);
+  var userPrompt =
+    'itemType: ' +
+    itemType +
+    '\n\nTekst źródłowy:\n---\n' +
+    text +
+    '\n---\nZwróć jeden obiekt JSON z polami pozycji Zotero.';
+  var body = {
+    systemInstruction: { parts: [{ text: GEMINI_SYSTEM_PROMPT }] },
+    contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+    generationConfig: {
+      temperature: 0.2,
+      responseMimeType: 'application/json',
+      responseSchema: geminiResponseSchema_(itemType),
+    },
+  };
+
+  var response;
+  try {
+    response = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(body),
+      muteHttpExceptions: true,
+      headers: { Accept: 'application/json' },
+    });
+  } catch (fetchErr) {
+    throw new Error(
+      'Błąd połączenia z Gemini: ' + String((fetchErr && fetchErr.message) || fetchErr)
+    );
+  }
+
+  var code = response.getResponseCode();
+  var rawText = response.getContentText() || '';
+  if (code === 429) {
+    throw new Error('Gemini zwróciło limit zapytań (429). Spróbuj później.');
+  }
+  if (code >= 400) {
+    var friendly = humanizeHttpError_(code, rawText);
+    if (friendly) {
+      throw new Error(friendly);
+    }
+    throw new Error(
+      'Gemini API błąd HTTP ' + code + ': ' + String(rawText).substring(0, 280)
+    );
+  }
+
+  var payload;
+  try {
+    payload = JSON.parse(rawText);
+  } catch (parseErr) {
+    throw new Error('Nieprawidłowa odpowiedź Gemini (nie-JSON).');
+  }
+
+  var draftRawText = extractGeminiText_(payload);
+  if (!draftRawText) {
+    throw new Error('Gemini nie zwróciło treści.');
+  }
+  var draftRaw;
+  try {
+    draftRaw = JSON.parse(draftRawText);
+  } catch (jsonErr) {
+    throw new Error('Gemini zwróciło nieparsowalny JSON.');
+  }
+  if (!draftRaw || typeof draftRaw !== 'object' || Array.isArray(draftRaw)) {
+    throw new Error('Draft Gemini nie jest obiektem JSON.');
+  }
+
+  var normalized = normalizeGeminiDraft_(itemType, draftRaw);
+  return {
+    draft: normalized.draft,
+    warnings: normalized.warnings,
+    model: model,
+    source: 'apps-script-direct',
+  };
+}
+
+/** Fallback przez Django /import/describe (gdy brak lokalnego klucza lub awaria direct). */
+function describeManualItemViaServer_(itemType, text, geminiKey) {
   var path = '/import/describe';
   if (getDebugMode()) {
     path += '?debug=1';
   }
   var headers = apiHeaders_();
-  var geminiKey = getGeminiApiKey();
   var payload = {
     item_type: String(itemType || '').trim(),
     text: String(text || ''),
   };
   if (geminiKey) {
-    // UrlFetchApp: custom headers w options.headers (obok contentType) — jak X-API-Key.
     headers['X-Gemini-Api-Key'] = geminiKey;
     payload.gemini_api_key = geminiKey;
   }
@@ -235,24 +431,123 @@ function describeManualItem(itemType, text) {
     headers: headers,
   });
   var parsed = parseResponse_(response);
-  // Nie zapisuj full lastImport (tekst źródłowy / klucz Gemini) — tylko skrót wyniku.
+  if (parsed && !parsed.source) {
+    parsed.source = 'django-server';
+  }
+  return parsed;
+}
+
+function rememberDescribeResult_(pathLabel, parsed, geminiKeySent) {
   PropertiesService.getDocumentProperties().setProperty(
     'lastImport',
     JSON.stringify({
       at: new Date().toISOString(),
-      path: path,
+      path: pathLabel,
       result: {
         model: parsed && parsed.model,
         warnings: parsed && parsed.warnings,
         draft_title: parsed && parsed.draft && parsed.draft.title,
-        gemini_key_sent: !!geminiKey,
+        source: parsed && parsed.source,
+        gemini_key_sent: !!geminiKeySent,
       },
     })
   );
-  return parsed;
 }
 
-/** Klucz Gemini z Script Properties (pusty string jeśli brak). Tylko do wywołań serwerowych. */
+function geminiResponseSchema_(itemType) {
+  var fields = MANUAL_COMMON_FIELDS.concat(MANUAL_ITEM_TYPE_FIELDS[itemType] || []);
+  var properties = {
+    itemType: { type: 'STRING' },
+    creators: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          creatorType: { type: 'STRING' },
+          firstName: { type: 'STRING' },
+          lastName: { type: 'STRING' },
+          name: { type: 'STRING' },
+        },
+      },
+    },
+  };
+  fields.forEach(function (field) {
+    if (field === 'creators') return;
+    properties[field] = { type: 'STRING' };
+  });
+  var ordering = ['itemType', 'title', 'creators', 'date', 'url', 'abstractNote'];
+  Object.keys(properties)
+    .sort()
+    .forEach(function (key) {
+      if (ordering.indexOf(key) < 0) ordering.push(key);
+    });
+  return {
+    type: 'OBJECT',
+    properties: properties,
+    propertyOrdering: ordering,
+  };
+}
+
+function extractGeminiText_(payload) {
+  var candidates = (payload && payload.candidates) || [];
+  if (!candidates.length) return '';
+  var content = candidates[0].content || {};
+  var parts = content.parts || [];
+  var chunks = [];
+  for (var i = 0; i < parts.length; i++) {
+    if (parts[i] && parts[i].text) {
+      chunks.push(String(parts[i].text));
+    }
+  }
+  return chunks.join('').trim();
+}
+
+function normalizeGeminiDraft_(itemType, draftRaw) {
+  var allowed = {};
+  MANUAL_COMMON_FIELDS.concat(MANUAL_ITEM_TYPE_FIELDS[itemType] || []).forEach(function (k) {
+    allowed[k] = true;
+  });
+  var draft = { itemType: itemType };
+  var warnings = [];
+  Object.keys(draftRaw).forEach(function (key) {
+    if (key === 'itemType' || key === 'collections' || key === 'collection_key') return;
+    if (!allowed[key]) return;
+    var value = draftRaw[key];
+    if (key === 'creators') {
+      if (!Array.isArray(value)) return;
+      var creators = [];
+      value.forEach(function (entry) {
+        if (!entry || typeof entry !== 'object') return;
+        var creatorType = String(entry.creatorType || 'author').trim() || 'author';
+        var name = String(entry.name || '').trim();
+        var first = String(entry.firstName || '').trim();
+        var last = String(entry.lastName || '').trim();
+        var out = { creatorType: creatorType };
+        if (name) {
+          out.name = name;
+        } else if (first || last) {
+          if (first) out.firstName = first;
+          if (last) out.lastName = last;
+        } else {
+          return;
+        }
+        creators.push(out);
+      });
+      if (creators.length) draft.creators = creators;
+      return;
+    }
+    if (value === null || value === undefined) return;
+    var str = String(value).trim();
+    if (!str) return;
+    draft[key] = str;
+  });
+  if (!String(draft.title || '').trim()) {
+    warnings.push('Brak tytułu w odpowiedzi modelu — uzupełnij ręcznie.');
+  }
+  return { draft: draft, warnings: warnings };
+}
+
+/** Klucz Gemini z Script Properties (pusty string jeśli brak). Do UrlFetch Gemini i fallbacku serwera. */
 function getGeminiApiKey() {
   var key = PropertiesService.getScriptProperties().getProperty(PROP_GEMINI_API_KEY);
   return key ? String(key).trim() : '';
@@ -2044,15 +2339,61 @@ function parseResponse_(response) {
     if (!detail && body.raw) {
       detail = String(body.raw).substring(0, 300);
     }
+    var friendly = humanizeHttpError_(code, text);
+    if (friendly) {
+      detail = friendly;
+    } else if (detail) {
+      detail = stripHtmlNoise_(String(detail)).substring(0, 400);
+    }
     var message = detail || ('HTTP ' + code);
     if (getDebugMode()) {
       message +=
         '\n[debug] HTTP ' +
         code +
         '\n' +
-        String(text).substring(0, 1200);
+        stripHtmlNoise_(String(text)).substring(0, 400);
     }
     throw new Error(message);
   }
   return body;
+}
+
+/**
+ * Cloudflare / HTML zamiast JSON API — krótki komunikat zamiast surowej strony błędu.
+ * Typowe: 520 „origin web server returned an invalid or incomplete response”.
+ */
+function humanizeHttpError_(code, text) {
+  var raw = String(text || '');
+  var lower = raw.toLowerCase();
+  var isHtml = raw.indexOf('<!DOCTYPE') >= 0 || raw.indexOf('<html') >= 0 || raw.indexOf('<HTML') >= 0;
+  var looksCloudflare =
+    lower.indexOf('cloudflare') >= 0 ||
+    lower.indexOf('cf-error') >= 0 ||
+    lower.indexOf('origin web server returned') >= 0 ||
+    lower.indexOf('error code 52') >= 0 ||
+    lower.indexOf('attention required') >= 0;
+  if (looksCloudflare || (isHtml && code >= 500) || code === 520 || code === 521 || code === 522 || code === 524) {
+    return (
+      'Proxy (Cloudflare) HTTP ' +
+      code +
+      ' — origin nie zwrócił pełnej odpowiedzi (timeout/reset). ' +
+      'Odśwież panel. Gemini z kluczem w Ustawieniach idzie bezpośrednio do Google, nie przez VPS.'
+    );
+  }
+  if (isHtml) {
+    var stripped = stripHtmlNoise_(raw);
+    return stripped
+      ? 'HTTP ' + code + ': ' + stripped.substring(0, 280)
+      : 'HTTP ' + code + ' (odpowiedź HTML zamiast JSON API).';
+  }
+  return '';
+}
+
+function stripHtmlNoise_(text) {
+  return String(text || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }

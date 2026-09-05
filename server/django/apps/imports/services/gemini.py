@@ -130,13 +130,13 @@ def describe_item_from_text(
         },
     }
 
-    # Cloudflare Free kończy proxy ~100s (524/520). Trzymaj zapas pod Caddy+Gunicorn.
+    # Cloudflare Free ~100s; Apps Script preferuje direct Gemini. Serwer: krótki cap.
     try:
         response = requests.post(
             url,
             params={"key": resolved_key},
             json=body,
-            timeout=45,
+            timeout=25,
         )
     except requests.RequestException as exc:
         logger.warning("Gemini HTTP error: %s", type(exc).__name__)

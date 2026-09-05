@@ -43,7 +43,7 @@ ${DOMAIN} {
 		-Server
 	}
 	# Timeouty > Cloudflare Free (~100s proxy) — CF i tak urwie wcześniej (524).
-	# 3m chroni lokalny Caddy→Django przy długim citing; Gemini describe cap=45s.
+	# 3m chroni lokalny Caddy→Django przy długim citing; Gemini describe (server) cap=25s.
 	reverse_proxy ${UPSTREAM} {
 		transport http {
 			dial_timeout 10s

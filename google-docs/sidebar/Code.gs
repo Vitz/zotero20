@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.2.1';
+const ADDON_VERSION = '2.2.2';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -207,7 +207,8 @@ function importManual(itemPayload, options) {
 
 /**
  * Gemini: tekst → draft pól (bez zapisu do Zotero).
- * Klucz z Script Properties idzie w nagłówku X-Gemini-Api-Key (nie w body / lastImport).
+ * Klucz z Script Properties: nagłówek X-Gemini-Api-Key + body.gemini_api_key
+ * (body = fallback gdy proxy obcina niestandardowe nagłówki; lastImport bez sekretu).
  * Zwraca { draft, warnings, model } albo rzuca z komunikatem 503 gdy brak klucza.
  */
 function describeManualItem(itemType, text) {
@@ -217,21 +218,24 @@ function describeManualItem(itemType, text) {
   }
   var headers = apiHeaders_();
   var geminiKey = getGeminiApiKey();
+  var payload = {
+    item_type: String(itemType || '').trim(),
+    text: String(text || ''),
+  };
   if (geminiKey) {
+    // UrlFetchApp: custom headers w options.headers (obok contentType) — jak X-API-Key.
     headers['X-Gemini-Api-Key'] = geminiKey;
+    payload.gemini_api_key = geminiKey;
   }
   var response = UrlFetchApp.fetch(API_BASE + path, {
     method: 'post',
     contentType: 'application/json',
-    payload: JSON.stringify({
-      item_type: String(itemType || '').trim(),
-      text: String(text || ''),
-    }),
+    payload: JSON.stringify(payload),
     muteHttpExceptions: true,
     headers: headers,
   });
   var parsed = parseResponse_(response);
-  // Nie zapisuj pełnego lastImport z tekstem źródłowym — tylko ścieżka i skrót wyniku.
+  // Nie zapisuj full lastImport (tekst źródłowy / klucz Gemini) — tylko skrót wyniku.
   PropertiesService.getDocumentProperties().setProperty(
     'lastImport',
     JSON.stringify({
@@ -241,6 +245,7 @@ function describeManualItem(itemType, text) {
         model: parsed && parsed.model,
         warnings: parsed && parsed.warnings,
         draft_title: parsed && parsed.draft && parsed.draft.title,
+        gemini_key_sent: !!geminiKey,
       },
     })
   );

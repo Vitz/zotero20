@@ -552,7 +552,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.2.1';
+    var SIDEBAR_VERSION = '2.2.2';
 
     // UrlFetchApp ma limity dzienne — 3 s to kompromis vs prośba o 1 s.
     // Przy długim otwarciu sidebara rozważ później 5 s w ustawieniach.
@@ -2358,7 +2358,7 @@
       if (inneGeminiConfigured === false) {
         btn.disabled = true;
         note.textContent =
-          'Brak klucza Gemini — wklej go w Ustawieniach (AI Studio) albo wypełnij pola ręcznie.';
+          'Brak klucza Gemini — ustaw w Ustawieniach albo wypełnij pola ręcznie.';
         return;
       }
       note.textContent = 'Sprawdzam dostępność Gemini…';
@@ -2368,7 +2368,7 @@
           btn.disabled = !ok;
           note.textContent = ok
             ? 'Gemini gotowe (klucz z Ustawień lub serwera).'
-            : 'Brak klucza Gemini — wklej go w Ustawieniach (AI Studio) albo wypełnij pola ręcznie.';
+            : 'Brak klucza Gemini — ustaw w Ustawieniach albo wypełnij pola ręcznie.';
         })
         .withFailureHandler(function () {
           inneGeminiConfigured = false;
@@ -2389,7 +2389,7 @@
           }
           statusEl.textContent = configured
             ? 'Klucz zapisany w Script Properties tego projektu.'
-            : 'Brak zapisanego klucza — Gemini w zakładce Inne będzie niedostępne (chyba że serwer ma własny klucz).';
+            : 'Brak zapisanego klucza — ustaw w Ustawieniach (albo serwer ma własny GEMINI_API_KEY).';
           if (configured) {
             var input = document.getElementById('gemini-api-key');
             if (input && !input.value) {
@@ -2444,32 +2444,66 @@
       var warnEl = document.getElementById('inne-gemini-warnings');
       warnEl.style.display = 'none';
       warnEl.textContent = '';
-      setStatus('Uzupełniam pola przez Gemini…');
-      document.getElementById('btn-inne-gemini').disabled = true;
-      google.script.run
-        .withSuccessHandler(function (r) {
-          document.getElementById('btn-inne-gemini').disabled = !inneGeminiConfigured;
-          applyInneDraft(r.draft || {});
-          var warnings = r.warnings || [];
-          if (warnings.length) {
-            warnEl.style.display = 'block';
-            warnEl.textContent = 'Ostrzeżenia: ' + warnings.join(' · ');
-          }
-          setStatus('Pola uzupełnione — sprawdź i kliknij „Utwórz w kolekcji”.', false);
-        })
-        .withFailureHandler(function (e) {
-          var msg = formatScriptError(e);
-          if (/503|GEMINI_API_KEY|nie jest skonfigurowane|brak klucza/i.test(msg)) {
-            inneGeminiConfigured = false;
-            document.getElementById('btn-inne-gemini').disabled = true;
-            document.getElementById('inne-gemini-note').textContent =
-              'Brak klucza Gemini — wklej go w Ustawieniach (AI Studio) albo wypełnij pola ręcznie.';
-          } else {
+      var geminiInput = document.getElementById('gemini-api-key');
+      var unsavedKey = geminiInput ? String(geminiInput.value || '').trim() : '';
+
+      function runDescribe() {
+        setStatus('Uzupełniam pola przez Gemini…');
+        document.getElementById('btn-inne-gemini').disabled = true;
+        google.script.run
+          .withSuccessHandler(function (r) {
             document.getElementById('btn-inne-gemini').disabled = !inneGeminiConfigured;
-          }
-          setStatus(msg, true);
-        })
-        .describeManualItem(itemType, text);
+            applyInneDraft(r.draft || {});
+            var warnings = r.warnings || [];
+            if (warnings.length) {
+              warnEl.style.display = 'block';
+              warnEl.textContent = 'Ostrzeżenia: ' + warnings.join(' · ');
+            }
+            setStatus('Pola uzupełnione — sprawdź i kliknij „Utwórz w kolekcji”.', false);
+          })
+          .withFailureHandler(function (e) {
+            var msg = formatScriptError(e);
+            if (/503|GEMINI_API_KEY|nie jest skonfigurowane|brak klucza/i.test(msg)) {
+              inneGeminiConfigured = false;
+              document.getElementById('btn-inne-gemini').disabled = true;
+              document.getElementById('inne-gemini-note').textContent =
+                'Brak klucza Gemini — ustaw w Ustawieniach albo wypełnij pola ręcznie.';
+            } else {
+              document.getElementById('btn-inne-gemini').disabled = !inneGeminiConfigured;
+            }
+            setStatus(msg, true);
+          })
+          .describeManualItem(itemType, text);
+      }
+
+      // Jeśli klucz jest wpisany w Ustawieniach, ale nie kliknięto „Zapisz” — zapisz przed call.
+      if (unsavedKey) {
+        setStatus('Zapisuję klucz Gemini…');
+        document.getElementById('btn-inne-gemini').disabled = true;
+        google.script.run
+          .withSuccessHandler(function (r) {
+            inneGeminiConfigured = !!(r && r.configured);
+            if (geminiInput) {
+              geminiInput.value = '';
+              geminiInput.placeholder = inneGeminiConfigured
+                ? '•••••••• (zapisany — wklej nowy, by zmienić)'
+                : 'Wklej klucz albo zostaw puste, by usunąć';
+            }
+            var statusEl = document.getElementById('gemini-key-status');
+            if (statusEl && inneGeminiConfigured) {
+              statusEl.textContent = 'Klucz zapisany w Script Properties tego projektu.';
+            }
+            refreshInneGeminiAvailability();
+            runDescribe();
+          })
+          .withFailureHandler(function (e) {
+            document.getElementById('btn-inne-gemini').disabled = !inneGeminiConfigured;
+            setStatus(formatScriptError(e), true);
+          })
+          .saveGeminiApiKey(unsavedKey);
+        return;
+      }
+      runDescribe();
     }
 
     function doImportInne() {

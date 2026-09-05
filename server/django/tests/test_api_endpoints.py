@@ -718,7 +718,61 @@ class TestImportDescribeEndpoint:
             **auth_headers,
         )
         assert response.status_code == 503
-        assert "gemini" in response.json()["error"].lower()
+        err = response.json()["error"].lower()
+        assert "gemini" in err
+        assert "ustawieniach" in err
+
+    @responses.activate
+    def test_describe_with_body_gemini_key(self, api_client, auth_headers, settings):
+        """Klucz w body.gemini_api_key działa bez env i bez nagłówka (fallback sidebara)."""
+        settings.GEMINI_API_KEY = ""
+        settings.GEMINI_MODEL = "gemini-2.0-flash-lite"
+        gemini_body = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "text": json.dumps(
+                                    {
+                                        "itemType": "book",
+                                        "title": "Z body",
+                                        "creators": [],
+                                        "publisher": "",
+                                        "date": "",
+                                        "DOI": "",
+                                        "ISBN": "",
+                                        "url": "",
+                                    }
+                                )
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+        responses.add(
+            responses.POST,
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            "gemini-2.0-flash-lite:generateContent",
+            json=gemini_body,
+            status=200,
+        )
+        response = api_client.post(
+            "/api/v1/import/describe",
+            data=json.dumps(
+                {
+                    "item_type": "book",
+                    "text": "Tytuł: Z body",
+                    "gemini_api_key": "body-gemini-key",
+                }
+            ),
+            content_type="application/json",
+            **auth_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["draft"]["title"] == "Z body"
+        assert "body-gemini-key" in (responses.calls[0].request.url or "")
 
     def test_requires_item_type(self, api_client, auth_headers, settings):
         settings.GEMINI_API_KEY = "test-gemini-key"

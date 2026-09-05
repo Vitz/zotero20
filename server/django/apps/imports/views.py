@@ -587,20 +587,19 @@ def import_describe(request):
 
     from .services.gemini import GeminiError, describe_item_from_text, resolve_gemini_api_key
 
-    # Preferuj nagłówek (nie ląduje w body / typowych logach debug JSON).
-    request_key = (request.headers.get("X-Gemini-Api-Key") or "").strip()
+    # Preferuj nagłówek; body.gemini_api_key = fallback (proxy / UrlFetchApp).
+    # META: WSGI canonical form of X-Gemini-Api-Key.
+    request_key = (
+        request.headers.get("X-Gemini-Api-Key")
+        or request.META.get("HTTP_X_GEMINI_API_KEY")
+        or ""
+    ).strip()
     if not request_key:
         request_key = str(body.get("gemini_api_key") or "").strip()
 
     if not resolve_gemini_api_key(request_key):
         return JsonResponse(
-            {
-                "error": (
-                    "Gemini nie jest skonfigurowane "
-                    "(brak X-Gemini-Api-Key w żądaniu i GEMINI_API_KEY na serwerze). "
-                    "Wklej klucz w Ustawieniach panelu albo wypełnij pola ręcznie."
-                )
-            },
+            {"error": "Brak klucza Gemini — ustaw w Ustawieniach"},
             status=503,
         )
 

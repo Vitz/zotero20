@@ -91,7 +91,7 @@ def describe_item_from_text(
     resolved_key = resolve_gemini_api_key(api_key)
     if not resolved_key:
         raise GeminiError(
-            "Gemini nie jest skonfigurowane (brak klucza w żądaniu i GEMINI_API_KEY na serwerze).",
+            "Brak klucza Gemini — ustaw w Ustawieniach",
             status_code=503,
         )
 

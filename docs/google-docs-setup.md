@@ -150,6 +150,16 @@ Google Docs
 
 ---
 
+## Limit UrlFetch — zwolnij wywołania
+
+Jeśli widzisz **„Usługa wywołana zbyt wiele razy jednego dnia: urlfetch”**:
+
+1. Zamknij zbędne karty Docs z Zotero.
+2. Wyłącz **Automatically update citations** (Zotero → Document Preferences).
+3. Nie ponawiaj Refresh / sprawdzeń do resetu limitu (~24 h).
+
+Pełne reguły throttlingu (fork Connector + sidebar): **[urlfetch-throttling.md](urlfetch-throttling.md)**.
+
 ## Częste pytania
 
 **Czy muszę coś instalować w samym Google Doc?**  

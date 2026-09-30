@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  django-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server/django
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: server/django/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Django system check
+        env:
+          DJANGO_SECRET_KEY: ci-test-key
+          DJANGO_DEBUG: "true"
+          ZOTERO20_API_KEY: ci-test-api-key
+        run: python manage.py check
+
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: pytest (unit, mock Zotero)
+        env:
+          DJANGO_SECRET_KEY: ci-test-key
+          DJANGO_DEBUG: "true"
+          ZOTERO20_API_KEY: ci-test-api-key
+          ZOTERO_WEB_API_KEY: ""
+        run: python -m pytest tests/ -m "not integration" -q
+
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run pytest (Zotero mocks)
+        env:
+          DJANGO_SECRET_KEY: ci-test-key
+          DJANGO_DEBUG: "true"
+          ZOTERO20_API_KEY: ci-test-api-key
+          ZOTERO_URL: http://127.0.0.1:23119
+          ZOTERO_WEB_API_KEY: ""
+        run: pytest -v --tb=short
+
+  appsscript-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Sprawdź składnię i wersje plików Apps Script
+        run: node scripts/check-appsscript-syntax.js
+
+  dockerfile-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Dockerfiles parse
+        run: |
+          docker build --check -f server/django/Dockerfile server/django
+          docker build --check -f server/docker/zotero/Dockerfile server/docker/zotero

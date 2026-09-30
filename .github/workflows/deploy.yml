@@ -1,0 +1,145 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: ci
+    uses: ./.github/workflows/publish-images.yml
+    secrets: inherit
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      IMAGE_OWNER: ${{ vars.GHCR_OWNER || 'vitz' }}
+      IMAGE_PREFIX: ${{ vars.GHCR_IMAGE_PREFIX || 'zotero20' }}
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse SSH target
+        id: ssh
+        run: |
+          raw="${{ vars.DEPLOY_HOST }}"
+          raw="${raw#http://}"
+          raw="${raw#https://}"
+          host="${raw%%:*}"
+          # 8089 w DEPLOY_HOST to port HTTP (tunel CF), NIE SSH
+          port="${{ vars.PORT }}"
+          if [ -z "$port" ]; then port="22"; fi
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+          echo "port=$port" >> "$GITHUB_OUTPUT"
+          echo "SSH → ${host}:${port} (HTTP zotero: :8089 via tunel)"
+
+      # Stack files (compose, scripts) come from the Actions checkout — no git on VPS.
+      # Deploy only pulls application code from GHCR images.
+      - name: Sync stack files to RPi
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ steps.ssh.outputs.host }}
+          port: ${{ steps.ssh.outputs.port }}
+          username: ${{ vars.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: "stack"
+          target: "${{ vars.DEPLOY_PATH }}"
+          overwrite: true
+
+      - name: Deploy stack on RPi (pull images only)
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_ZOTERO: ghcr.io/${{ env.IMAGE_OWNER }}/${{ env.IMAGE_PREFIX }}-zotero:${{ env.IMAGE_TAG }}
+          IMAGE_DJANGO: ghcr.io/${{ env.IMAGE_OWNER }}/${{ env.IMAGE_PREFIX }}-django:${{ env.IMAGE_TAG }}
+        with:
+          host: ${{ steps.ssh.outputs.host }}
+          port: ${{ steps.ssh.outputs.port }}
+          username: ${{ vars.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          command_timeout: 15m
+          envs: IMAGE_ZOTERO,IMAGE_DJANGO
+          script: |
+            set -euo pipefail
+            DEPLOY_ROOT="${{ vars.DEPLOY_PATH }}"
+            mkdir -p "${DEPLOY_ROOT}/stack"
+            cd "${DEPLOY_ROOT}/stack"
+            chmod +x scripts/*.sh
+            export ZOTERO20_IMAGE_ZOTERO="${IMAGE_ZOTERO}"
+            export ZOTERO20_IMAGE_DJANGO="${IMAGE_DJANGO}"
+            export GHCR_PULL_TOKEN="${{ secrets.GHCR_PULL_TOKEN }}"
+            export GHCR_PULL_USER="${{ vars.GHCR_OWNER || 'vitz' }}"
+            export CLOUDFLARED_TUNNEL_TOKEN="${{ secrets.CLOUDFLARED_TUNNEL_TOKEN }}"
+            if [ ! -f .env ]; then
+              cp .env.example .env
+            fi
+            set_env() {
+              key="$1"
+              val="$2"
+              if grep -q "^${key}=" .env; then
+                sed -i "s|^${key}=.*|${key}=${val}|" .env
+              else
+                echo "${key}=${val}" >> .env
+              fi
+            }
+            set_env ZOTERO20_API_KEY "${{ secrets.ZOTERO20_API_KEY }}"
+            set_env DJANGO_SECRET_KEY "${{ secrets.DJANGO_SECRET_KEY }}"
+            ZOTERO_WEB_KEY="${{ secrets.ZOTERO_API_RW }}"
+            if [ -z "$ZOTERO_WEB_KEY" ]; then
+              ZOTERO_WEB_KEY="${{ secrets.ZOTER_API_RW }}"
+            fi
+            if [ -n "$ZOTERO_WEB_KEY" ]; then
+              set_env ZOTERO_WEB_API_KEY "$ZOTERO_WEB_KEY"
+            fi
+            if [ -n "${{ secrets.ZOTERO_WEB_USER_ID }}" ]; then
+              set_env ZOTERO_WEB_USER_ID "${{ secrets.ZOTERO_WEB_USER_ID }}"
+            fi
+            set_env ZOTERO20_HOST_PORT "8089"
+            set_env GUNICORN_WORKERS "1"
+            set_env GUNICORN_THREADS "2"
+            set_env GUNICORN_TIMEOUT "180"
+            set_env ZOTERO_PROXY_DOCUMENT_TIMEOUT "180"
+            set_env DJANGO_ALLOWED_HOSTS "zotero.keyweb.pl,localhost,127.0.0.1"
+            set_env ZOTERO20_IMAGE_ZOTERO "${IMAGE_ZOTERO}"
+            set_env ZOTERO20_IMAGE_DJANGO "${IMAGE_DJANGO}"
+            ./scripts/deploy.sh
+            chmod +x scripts/setup-caddy.sh
+            ./scripts/setup-caddy.sh
+
+      - name: Smoke test
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ steps.ssh.outputs.host }}
+          port: ${{ steps.ssh.outputs.port }}
+          username: ${{ vars.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            export ZOTERO_BASE=http://127.0.0.1:8089
+            export ZOTERO20_API_KEY="${{ secrets.ZOTERO20_API_KEY }}"
+            export SMOKE_TEST_DOI_IMPORT=1
+            export REQUIRE_WEB_API=1
+            cd "${{ vars.DEPLOY_PATH }}/stack"
+            ./scripts/test-api.sh
+
+      # Smoke test na hoście przechodzi także wtedy, gdy domena wskazuje na inną maszynę.
+      # Dopiero ta kontrola odróżnia "wdrożone" od "wdrożone i faktycznie serwowane".
+      - name: Verify public domain serves this build
+        env:
+          PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL || 'https://zotero.keyweb.pl' }}
+          EXPECTED_BUILD: ${{ github.sha }}
+          ZOTERO20_API_KEY: ${{ secrets.ZOTERO20_API_KEY }}
+        run: bash stack/scripts/verify-public.sh

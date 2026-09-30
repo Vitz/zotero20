@@ -1,0 +1,18 @@
+# Build Chrome (MV3) and Firefox (MV2) extensions — output on host in upstream/build/
+#
+#   docker compose build connector
+#   docker compose run --rm connector
+#
+# Or: .\build-connector.ps1  (both browsers)
+# Or: .\build-firefox.ps1    (Firefox-focused output)
+
+name: zotero20-connector
+
+services:
+  connector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/workspace
+    working_dir: /workspace

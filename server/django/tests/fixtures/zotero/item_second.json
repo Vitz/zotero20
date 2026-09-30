@@ -1,0 +1,18 @@
+{
+  "key": "ITEMKEY2",
+  "version": 1,
+  "data": {
+    "itemType": "journalArticle",
+    "title": "Second Test Article",
+    "DOI": "10.1000/xyz123",
+    "date": "2020",
+    "creators": [
+      {
+        "creatorType": "author",
+        "lastName": "Kowalski",
+        "firstName": "Anna"
+      }
+    ],
+    "collections": ["ABCD1234"]
+  }
+}

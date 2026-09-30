@@ -1,26 +1,31 @@
 #!/usr/bin/env bash
-# Smoke test — uruchom na RPi (localhost) lub z zewnątrz (ustaw ZOTERO_BASE + CF headers).
+# Smoke test — Django gateway (jeden host, X-API-Key).
 set -euo pipefail
 
-ZOTERO_BASE="${ZOTERO_BASE:-http://127.0.0.1:23119}"
-CF_ID="${CF_ACCESS_CLIENT_ID:-}"
-CF_SECRET="${CF_ACCESS_CLIENT_SECRET:-}"
+BASE="${ZOTERO_BASE:-http://127.0.0.1:8000}"
+API_KEY="${ZOTERO20_API_KEY:-}"
 
-CURL_OPTS=(-sS -f)
-if [[ -n "$CF_ID" && -n "$CF_SECRET" ]]; then
-  CURL_OPTS+=(-H "CF-Access-Client-Id: $CF_ID" -H "CF-Access-Client-Secret: $CF_SECRET")
+if [[ -z "$API_KEY" ]]; then
+  echo "Ustaw ZOTERO20_API_KEY (nagłówek X-API-Key)."
+  exit 1
 fi
 
-echo "== ping =="
-curl "${CURL_OPTS[@]}" "$ZOTERO_BASE/connector/ping"
+HDR=(-H "X-API-Key: $API_KEY")
+
+echo "== Zotero ping via gateway (${BASE}/connector/ping) =="
+curl -sS -f "${HDR[@]}" "$BASE/connector/ping"
 echo
 
 echo "== api-plus health =="
-curl "${CURL_OPTS[@]}" "$ZOTERO_BASE/api/plus/health" || echo "(api-plus może nie być zainstalowane)"
+curl -sS "${HDR[@]}" "$BASE/api/plus/health" || echo "(api-plus może nie być zainstalowane)"
 echo
 
-echo "== collections (sample) =="
-curl "${CURL_OPTS[@]}" "$ZOTERO_BASE/api/users/0/collections" | head -c 500
+echo "== Django health (bez klucza — publiczny) =="
+curl -sS "$BASE/api/v1/health"
+echo
+
+echo "== Django studies (z kluczem) =="
+curl -sS "${HDR[@]}" "$BASE/api/v1/studies"
 echo
 
 echo "OK"

@@ -1,0 +1,21 @@
+# Test runner — pytest z mockami Zotero (bez pełnego kontenera Zotero Desktop).
+name: zotero20-test
+
+services:
+  pytest:
+    build:
+      context: ./django
+      dockerfile: Dockerfile
+    container_name: zotero20-pytest
+    working_dir: /app
+    command: >
+      sh -c "pip install -q -r requirements-dev.txt &&
+             pytest -v --tb=short"
+    environment:
+      DJANGO_SECRET_KEY: test-secret-key
+      DJANGO_DEBUG: "true"
+      ZOTERO20_API_KEY: test-api-key
+      ZOTERO_URL: http://127.0.0.1:23119
+      ZOTERO_WEB_API_KEY: ""
+    volumes:
+      - ./django:/app

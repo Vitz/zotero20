@@ -2,7 +2,9 @@ import pytest
 import responses
 
 from apps.imports.middleware import extract_item_orcid, normalize_doi, normalize_orcid
+from apps.imports.services.doi import abbreviate_journal_title, resolve_journal_abbrev
 from apps.imports.services.exceptions import ZoteroClientError
+from apps.imports.services.orcid import plan_orcid_works
 from apps.imports.services.zotero import ZoteroClient
 from tests.constants import COLLECTION_KEY, ITEM_KEY_1, TEST_DOI
 from tests.helpers.zotero_mock import (
@@ -27,6 +29,23 @@ class TestNormalizeHelpers:
         assert normalize_orcid("0000-0002-1825-0097") == "0000-0002-1825-0097"
         assert normalize_orcid("https://orcid.org/0000-0002-1825-0097") == "0000-0002-1825-0097"
         assert normalize_orcid("bad") is None
+
+    def test_journal_abbrev_helpers(self):
+        assert resolve_journal_abbrev("J. Test", "Long Name") == "J. Test"
+        assert abbreviate_journal_title("Advances in Engineering Software") == "AES"
+        assert resolve_journal_abbrev("", "Advances in Engineering Software") == "AES"
+
+    def test_plan_orcid_works_empty_on_fetch_error(self, monkeypatch):
+        import apps.imports.services.orcid as orcid_mod
+        import requests
+
+        def boom(_orcid):
+            raise requests.RequestException("network")
+
+        monkeypatch.setattr(orcid_mod, "fetch_orcid_works", boom)
+        plan = plan_orcid_works("0000-0002-1825-0097", limit=10)
+        assert plan["works"] == []
+        assert plan["summary"]["error_count"] == 1
 
     def test_extract_item_orcid_from_creator_and_extra(self):
         assert (

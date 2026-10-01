@@ -9,6 +9,7 @@ urlpatterns = [
     path("collections", views.collections_list, name="collections"),
     path("studies", views.studies_list, name="studies"),
     path("import/doi", views.import_doi, name="import-doi"),
+    path("import/orcid/plan", views.import_orcid_plan, name="import-orcid-plan"),
     path("import/orcid", views.import_orcid, name="import-orcid"),
     path("import/manual", views.import_manual, name="import-manual"),
     path("import/describe", views.import_describe, name="import-describe"),

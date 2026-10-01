@@ -17,19 +17,43 @@ CITATION_LOCALES: list[dict[str, str]] = [
 _LOCALE_IDS = {item["id"].casefold(): item["id"] for item in CITATION_LOCALES}
 
 # Popularne style CSL (identyfikator = fragment URL zotero.org/styles/…)
+# example = podpowiedź jak wygląda cytowanie w tekście
 CSL_STYLES: list[dict[str, str]] = [
-    {"id": "apa", "label": "APA 7th edition"},
-    {"id": "ieee", "label": "IEEE"},
-    {"id": "vancouver", "label": "Vancouver"},
-    {"id": "chicago-author-date", "label": "Chicago (autor–data)"},
-    {"id": "harvard-cite-them-right", "label": "Harvard (Cite Them Right)"},
-    {"id": "modern-language-association", "label": "MLA 9th edition"},
+    {"id": "apa", "label": "APA 7th", "example": "(Smith et al., 2020)"},
+    {"id": "ieee", "label": "IEEE", "example": "[1]"},
+    {"id": "vancouver", "label": "Vancouver", "example": "(1)"},
+    {"id": "nature", "label": "Nature", "example": "¹ / 1"},
+    {"id": "american-medical-association", "label": "AMA", "example": "1"},
+    {"id": "american-chemical-society", "label": "ACS", "example": "(1)"},
+    {"id": "chicago-author-date", "label": "Chicago (autor–data)", "example": "(Smith 2020)"},
+    {"id": "chicago-note-bibliography", "label": "Chicago (przypisy)", "example": "¹ Smith…"},
+    {"id": "harvard-cite-them-right", "label": "Harvard (Cite Them Right)", "example": "(Smith, 2020)"},
+    {"id": "elsevier-harvard", "label": "Elsevier – Harvard", "example": "(Smith, 2020)"},
+    {"id": "modern-language-association", "label": "MLA 9th", "example": "(Smith 20)"},
+    {"id": "iso690-author-date-en", "label": "ISO 690 (autor–data)", "example": "(SMITH, 2020)"},
+    {"id": "iso690-numeric-brackets-en", "label": "ISO 690 (numeryczny)", "example": "[1]"},
+    {"id": "turabian-author-date", "label": "Turabian (autor–data)", "example": "(Smith 2020)"},
+    {"id": "springer-basic-author-date", "label": "Springer (autor–data)", "example": "(Smith 2020)"},
+    {"id": "springer-basic-brackets", "label": "Springer [numeryczny]", "example": "[1]"},
+    {"id": "frontiers", "label": "Frontiers", "example": "(Smith et al., 2020)"},
+    {"id": "plos", "label": "PLOS", "example": "[1]"},
+    {"id": "american-political-science-association", "label": "APSA", "example": "(Smith 2020)"},
+    {"id": "associacao-brasileira-de-normas-tecnicas", "label": "ABNT NBR 6023", "example": "(SMITH, 2020)"},
 ]
 
 _STYLE_IDS = {style["id"] for style in CSL_STYLES}
 
-# Style numeryczne: cytowanie w tekście to [1], a bibliografia jest w kolejności cytowania.
-NUMERIC_STYLE_IDS = {"ieee", "vancouver"}
+# Style numeryczne: cytowanie w tekście to [1]/1), a bibliografia jest w kolejności cytowania.
+NUMERIC_STYLE_IDS = {
+    "ieee",
+    "vancouver",
+    "nature",
+    "american-medical-association",
+    "american-chemical-society",
+    "iso690-numeric-brackets-en",
+    "springer-basic-brackets",
+    "plos",
+}
 
 # Zotero numeruje każdą pozycję pobraną osobno od 1 — numer trzeba odciąć i nadać własny.
 _LEADING_NUMBER_RE = re.compile(r"^\s*(?:\[\s*\d+\s*\]|\(\s*\d+\s*\)|\d+\s*[.)])\s*")

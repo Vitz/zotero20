@@ -7,6 +7,7 @@ import requests
 from django.conf import settings
 
 from apps.imports.middleware import extract_item_orcid
+from .doi import resolve_journal_abbrev
 
 from .bibliography import DEFAULT_LOCALE, parse_formatted_items, resolve_style_id
 from .citation import format_citation_text, parse_citation_html
@@ -57,10 +58,15 @@ class ZoteroClient:
     def _summarize_item(self, entry: dict) -> dict:
         data = entry.get("data") or {}
         creators = data.get("creators") or []
+        publication_title = (data.get("publicationTitle") or "").strip()
         return {
             "key": entry.get("key", ""),
             "title": data.get("title", ""),
-            "journal_abbrev": (data.get("journalAbbreviation") or "").strip(),
+            "journal_abbrev": resolve_journal_abbrev(
+                data.get("journalAbbreviation") or "",
+                publication_title,
+            ),
+            "publication_title": publication_title,
             "doi": data.get("DOI", ""),
             "orcid": extract_item_orcid(data),
             "date": data.get("date", ""),
@@ -102,12 +108,20 @@ class ZoteroClient:
             return item
         return None
 
-    def list_collection_items(self, collection_key: str, limit: int = 20) -> list[dict]:
+    def list_collection_items(
+        self, collection_key: str, limit: int = 20, start: int = 0
+    ) -> list[dict]:
         limit = max(1, min(limit, 100))
+        start = max(0, start)
         response = self._request(
             "GET",
             f"/api/users/0/collections/{collection_key}/items/top",
-            params={"limit": limit, "sort": "dateAdded", "direction": "desc"},
+            params={
+                "limit": limit,
+                "start": start,
+                "sort": "dateAdded",
+                "direction": "desc",
+            },
         )
         if response.status_code != 200:
             raise ZoteroClientError(
@@ -127,6 +141,28 @@ class ZoteroClient:
                 response.status_code,
             )
         return [self._summarize_item(entry) for entry in raw if isinstance(entry, dict)]
+
+    def list_all_collection_items(
+        self, collection_key: str, max_items: int = 2000
+    ) -> list[dict]:
+        """Pobiera całą kolekcję stronami po 100 (Local API)."""
+        items: list[dict] = []
+        start = 0
+        page_size = 100
+        max_items = max(1, min(max_items, 5000))
+        while start < max_items:
+            batch = self.list_collection_items(
+                collection_key,
+                limit=min(page_size, max_items - start),
+                start=start,
+            )
+            if not batch:
+                break
+            items.extend(batch)
+            if len(batch) < page_size:
+                break
+            start += len(batch)
+        return items
 
     def _fetch_item_entry(self, item_key: str) -> dict:
         response = self._request("GET", f"/api/users/0/items/{item_key}")
@@ -289,6 +325,7 @@ class ZoteroClient:
             "DOI": doi,
             "creators": metadata.get("creators", []),
             "publicationTitle": metadata.get("publicationTitle", ""),
+            "journalAbbreviation": metadata.get("journalAbbreviation", ""),
             "volume": metadata.get("volume", ""),
             "issue": metadata.get("issue", ""),
             "pages": metadata.get("pages", ""),

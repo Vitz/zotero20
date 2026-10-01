@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.2.4';
+const ADDON_VERSION = '2.2.6';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -193,16 +193,8 @@ function importDoi(doi, options) {
       citationText = '';
     }
   }
-  // Automatyczna podmiana [*] tylko w trybie placeholderowym — w trybie kursora
-  // import nie powinien nic wstawiać do dokumentu bez decyzji użytkownika.
-  if (citationText && !result.duplicate && getCitationInsertMode() === 'placeholder') {
-    try {
-      replacePlaceholderInDocument_(citationText, buildIdentifiers_('doi', result.doi || doi), itemKey);
-      result.placeholder_replaced = true;
-    } catch (e) {
-      result.placeholder_error = e.message;
-    }
-  }
+  // Import DOI tylko dodaje do kolekcji — NIE zamienia [*] / placeholderów w dokumencie.
+  // Cytowanie wstawia użytkownik osobno (przycisk „Wstaw cytowanie” / lista).
   if (itemKey) {
     rememberSessionItem_(result, itemKey, citationText);
   }
@@ -220,6 +212,42 @@ function importOrcid(orcid, options, limit) {
     payload.collection_key = options.collectionKey;
   }
   return apiPost('/import/orcid', payload);
+}
+
+/**
+ * Plan importu ORCID: lista DOI bez zapisu do Zotero.
+ * Używane przez sidebar do chunkowanego importu z progressem.
+ */
+function planOrcidImport(orcid, limit) {
+  return apiPost('/import/orcid/plan', {
+    orcid: orcid,
+    limit: limit || 50,
+  });
+}
+
+/**
+ * Import DOI z retry (3 próby). Nie rzuca przy porażce — zwraca { ok, result|error, retries }.
+ */
+function importDoiWithRetry(doi, options, maxAttempts) {
+  var attempts = Math.max(1, Math.min(Number(maxAttempts) || 3, 5));
+  var lastError = null;
+  for (var i = 1; i <= attempts; i++) {
+    try {
+      var result = importDoi(doi, options);
+      return { ok: true, result: result, retries: i, doi: doi };
+    } catch (e) {
+      lastError = e;
+      if (i < attempts) {
+        Utilities.sleep(400 * i);
+      }
+    }
+  }
+  return {
+    ok: false,
+    error: lastError ? String(lastError.message || lastError) : 'Nieznany błąd',
+    retries: attempts,
+    doi: doi,
+  };
 }
 
 /**
@@ -247,18 +275,7 @@ function importManual(itemPayload, options) {
       citationText = '';
     }
   }
-  if (citationText && !result.duplicate && getCitationInsertMode() === 'placeholder') {
-    try {
-      replacePlaceholderInDocument_(
-        citationText,
-        buildIdentifiers_('doi', result.doi || ''),
-        itemKey
-      );
-      result.placeholder_replaced = true;
-    } catch (e) {
-      result.placeholder_error = e.message;
-    }
-  }
+  // Import Inne / ręczny tylko dodaje do kolekcji — NIE zamienia [*] w dokumencie.
   if (itemKey) {
     rememberSessionItem_(result, itemKey, citationText);
   }
@@ -604,8 +621,20 @@ function getCollectionItems(collectionKey, limit) {
   if (!key) {
     throw new Error('Brak klucza kolekcji.');
   }
-  var lim = limit || 20;
-  return apiGet('/collection-items?collection_key=' + encodeURIComponent(key) + '&limit=' + lim);
+  // all=1: cała kolekcja (stronicowanie po stronie serwera); limit ignorowany.
+  // Zachowaj limit dla wywołań jawnych (np. smoke / stare skrypty).
+  if (limit === undefined || limit === null || limit === '' || Number(limit) <= 0) {
+    return apiGet(
+      '/collection-items?collection_key=' + encodeURIComponent(key) + '&all=1'
+    );
+  }
+  var lim = Math.max(1, Math.min(Number(limit) || 20, 100));
+  return apiGet(
+    '/collection-items?collection_key=' +
+      encodeURIComponent(key) +
+      '&limit=' +
+      lim
+  );
 }
 
 function removeFromCollection(collectionKey, itemKey) {

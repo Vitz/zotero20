@@ -40,7 +40,16 @@ _BATCH_ITEMS = {
     ITEM_KEY_1: ("Smith, J. (2013). Test Article About Nature.", "(Smith, 2013)"),
     ITEM_KEY_2: ("Kowalski, A. (2020). Second Test Article.", "(Kowalski, 2020)"),
 }
-_NUMERIC_STYLES = ("ieee", "vancouver")
+_NUMERIC_STYLES = (
+    "ieee",
+    "vancouver",
+    "nature",
+    "american-medical-association",
+    "american-chemical-society",
+    "iso690-numeric-brackets-en",
+    "springer-basic-brackets",
+    "plos",
+)
 
 
 def register_zotero_mocks(

@@ -324,7 +324,7 @@
       </button>
     </div>
 
-    <details id="inne-gemini-block" style="margin-top:12px;">
+    <details id="inne-gemini-block" open style="margin-top:12px;">
       <summary>Uzupełnij z tekstu (Gemini)</summary>
       <p class="hint" style="font-size:11px;color:#555;margin-top:6px;">
         Wklej abstrakt, opis albo cytowanie. Model wypełni pola poniżej — sprawdź je przed utworzeniem.
@@ -356,6 +356,12 @@
     <select id="biblio-style" disabled>
       <option value="">Ładowanie stylów…</option>
     </select>
+    <p id="biblio-style-example" class="hint" style="font-size:12px;color:#333;margin-top:4px;font-weight:500;">
+      Przykład w tekście: —
+    </p>
+    <p class="hint" style="font-size:11px;color:#555;margin-top:4px;">
+      W liście widać przykładowe cytowanie; powyżej aktualny wybór.
+    </p>
     <button id="btn-apply-style" type="button" onclick="doApplyStyle()" disabled>
       Zmień styl (cytowania + bibliografia)
     </button>
@@ -396,18 +402,9 @@
       <span id="current-collection-kolekcja-label"></span>
     </div>
     <p class="hint" style="font-size:11px;color:#555;margin-top:0;">
-      Usuń pozycję z kolekcji na serwerze. Pozycja pozostaje w bibliotece Zotero — znika tylko z tej kolekcji.
+      Ta sama lista „Pozycje w kolekcji” poniżej — tu możesz <strong>usunąć</strong> pozycję z kolekcji
+      (pozostaje w bibliotece Zotero). Paginacja po 30.
     </p>
-    <div id="kolekcja-search-wrap" style="position:relative;margin-bottom:6px;">
-      <input id="kolekcja-search" type="search" placeholder="Szukaj: tytuł, autor, skrót, DOI, ORCID…" autocomplete="off" spellcheck="false" style="width:100%;box-sizing:border-box;margin-top:0;padding:6px 28px 6px 6px;font-size:12px;">
-      <button type="button" id="kolekcja-search-clear" title="Wyczyść" aria-label="Wyczyść" style="position:absolute;right:2px;top:50%;transform:translateY(-50%);width:auto;margin:0;padding:2px 8px;font-size:16px;line-height:1;background:transparent;border:none;color:#666;cursor:pointer;display:none;">×</button>
-    </div>
-    <p id="kolekcja-filter-count" style="font-size:11px;color:#555;margin:0 0 6px;display:none;"></p>
-    <p id="kolekcja-dedup-note" class="hint" style="font-size:11px;color:#555;display:none;"></p>
-    <p id="kolekcja-loading" style="display:none;">Ładowanie pozycji…</p>
-    <p id="kolekcja-empty" style="display:none;">Brak pozycji w kolekcji.</p>
-    <div id="kolekcja-list"></div>
-    <button type="button" onclick="loadKolekcjaTab()" style="margin-top:10px;">Odśwież listę</button>
   </div>
 
   <div id="tab-settings" class="tab">
@@ -548,15 +545,19 @@
     <p id="study-overview-filter-count"></p>
     <p id="study-doi-dedup-note" class="hint" style="font-size:11px;color:#555;display:none;"></p>
     <div id="study-overview-list"></div>
+    <div id="study-overview-pager" style="display:none;margin-top:8px;font-size:12px;align-items:center;gap:8px;">
+      <button type="button" id="study-overview-prev" onclick="studyOverviewPrevPage()">←</button>
+      <span id="study-overview-page-label"></span>
+      <button type="button" id="study-overview-next" onclick="studyOverviewNextPage()">→</button>
+    </div>
   </div>
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.2.4';
+    var SIDEBAR_VERSION = '2.2.6';
 
-    // UrlFetchApp ma limity dzienne — 3 s to kompromis vs prośba o 1 s.
-    // Przy długim otwarciu sidebara rozważ później 5 s w ustawieniach.
-    var HEALTH_POLL_MS = 3000;
+    // UrlFetchApp: health co 5 min (wcześniej 3 s paliło dzienny limit).
+    var HEALTH_POLL_MS = 300000;
     var healthPollState = {
       apiBusy: false,
       zoteroBusy: false,
@@ -738,14 +739,34 @@
     function showTab(name) {
       document.querySelectorAll('.tab').forEach(function (el) { el.classList.remove('active'); });
       document.getElementById('tab-' + name).classList.add('active');
+      // Jedna lista „Pozycje w kolekcji” na DOI / ORCID / Inne / Kolekcja.
+      var overview = document.getElementById('study-overview');
+      if (overview) {
+        var showOverview =
+          name === 'doi' || name === 'orcid' || name === 'inne' || name === 'kolekcja';
+        if (!showOverview) {
+          overview.style.display = 'none';
+        } else if (studyOverviewState.allItems.length || name === 'kolekcja') {
+          overview.style.display = 'block';
+        }
+      }
       if (name === 'settings') {
         loadStatus();
         loadGeminiKeyStatus();
       }
-      if (name === 'kolekcja') loadKolekcjaTab();
+      if (name === 'kolekcja') {
+        loadStudyOverview();
+        applyStudyOverviewFilter(true);
+      }
       if (name === 'inne') {
         ensureInneFormBuilt();
         refreshInneGeminiAvailability();
+        var geminiBlock = document.getElementById('inne-gemini-block');
+        if (geminiBlock) geminiBlock.open = true;
+      }
+      // Odśwież przyciski Wstaw/Usuń na wspólnej liście.
+      if (studyOverviewState.filteredItems && studyOverviewState.filteredItems.length) {
+        applyStudyOverviewFilter(true);
       }
     }
 
@@ -781,7 +802,7 @@
       ) {
         return (
           'Błąd proxy (Cloudflare) zamiast odpowiedzi API. Odśwież panel i spróbuj ponownie. ' +
-          'Dla Gemini upewnij się, że masz wersję 2.2.4+ i klucz w Ustawieniach (wywołanie bezpośrednie do Google).'
+          'Dla Gemini upewnij się, że masz wersję 2.2.6+ i klucz w Ustawieniach (wywołanie bezpośrednie do Google).'
         );
       }
       if (msg.length > 420) {
@@ -993,19 +1014,40 @@
       return /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/i.test(v) ? v : '';
     }
 
+    function abbreviateJournalTitleClient(title) {
+      var cleaned = String(title || '').replace(/[^\w\s\-]/gi, ' ').trim();
+      if (!cleaned) return '';
+      var stop = {
+        a: 1, an: 1, and: 1, of: 1, the: 1, for: 1, in: 1, on: 1, to: 1, or: 1,
+        de: 1, des: 1, du: 1, la: 1, le: 1, les: 1, und: 1, der: 1, die: 1, das: 1,
+        van: 1, von: 1, z: 1, za: 1, ze: 1, w: 1, we: 1, i: 1, oraz: 1, nad: 1, pod: 1
+      };
+      var words = cleaned.split(/\s+/).filter(Boolean);
+      var significant = words.filter(function (w) {
+        return !stop[w.toLowerCase()] && w.length > 1;
+      });
+      if (!significant.length) significant = words;
+      if (!significant.length) return '';
+      if (significant.length === 1) return significant[0].slice(0, 12).toUpperCase();
+      return significant.slice(0, 8).map(function (w) {
+        return w.charAt(0).toUpperCase();
+      }).join('');
+    }
+
     function appendItemMeta(parent, item) {
       var parts = [];
       var abbrev = String(item.journal_abbrev || '').trim();
+      if (!abbrev) {
+        abbrev = abbreviateJournalTitleClient(item.publication_title || '');
+      }
       var author = formatFirstAuthor(item.creators || item.authors);
       var date = formatItemDate(item.date || item.year);
       var doi = stripDoiPrefix(item.doi);
       var orcid = normalizeOrcidId(item.orcid || item.first_author_orcid || '');
 
-      var authorSeg = '';
-      if (abbrev) authorSeg = '[' + abbrev + ']';
-      if (author) authorSeg = authorSeg ? authorSeg + ' ' + author : author;
-      if (authorSeg) parts.push(authorSeg);
+      if (author) parts.push(author);
       if (date) parts.push(date);
+      if (abbrev) parts.push(abbrev);
 
       if (parts.length || doi) {
         var meta = document.createElement('div');
@@ -1040,11 +1082,15 @@
       }
     }
 
+    var COLLECTION_PAGE_SIZE = 30;
+
     var studyOverviewState = {
       allItems: [],
+      filteredItems: [],
       meta: {},
       searchQuery: '',
       searchTimer: null,
+      page: 0,
     };
 
     function studyItemSearchText(item) {
@@ -1053,6 +1099,7 @@
       var parts = [
         String(item.title || ''),
         String(item.journal_abbrev || ''),
+        String(item.publication_title || ''),
         String(item.doi || ''),
         doi,
         orcid,
@@ -1092,6 +1139,9 @@
       if (filtering && total > 0) {
         el.style.display = 'block';
         el.textContent = visible + ' z ' + total + ' pozycji';
+      } else if (total > 0) {
+        el.style.display = 'block';
+        el.textContent = total + ' pozycji w kolekcji';
       } else {
         el.style.display = 'none';
         el.textContent = '';
@@ -1109,9 +1159,53 @@
       }
     }
 
+    function updateStudyOverviewPager() {
+      var pager = document.getElementById('study-overview-pager');
+      var label = document.getElementById('study-overview-page-label');
+      var prev = document.getElementById('study-overview-prev');
+      var next = document.getElementById('study-overview-next');
+      if (!pager || !label) return;
+      var total = studyOverviewState.filteredItems.length;
+      var pages = Math.max(1, Math.ceil(total / COLLECTION_PAGE_SIZE) || 1);
+      if (studyOverviewState.page >= pages) {
+        studyOverviewState.page = Math.max(0, pages - 1);
+      }
+      if (total <= COLLECTION_PAGE_SIZE) {
+        pager.style.display = 'none';
+        return;
+      }
+      pager.style.display = 'flex';
+      label.textContent =
+        'Strona ' + (studyOverviewState.page + 1) + ' / ' + pages +
+        ' (po ' + COLLECTION_PAGE_SIZE + ')';
+      if (prev) prev.disabled = studyOverviewState.page <= 0;
+      if (next) next.disabled = studyOverviewState.page >= pages - 1;
+    }
+
+    function studyOverviewPrevPage() {
+      if (studyOverviewState.page > 0) {
+        studyOverviewState.page -= 1;
+        applyStudyOverviewFilter(true);
+      }
+    }
+
+    function studyOverviewNextPage() {
+      var pages = Math.ceil(studyOverviewState.filteredItems.length / COLLECTION_PAGE_SIZE) || 1;
+      if (studyOverviewState.page < pages - 1) {
+        studyOverviewState.page += 1;
+        applyStudyOverviewFilter(true);
+      }
+    }
+
+    function isKolekcjaTabActive() {
+      var active = document.querySelector('.tab.active');
+      return !!(active && active.id === 'tab-kolekcja');
+    }
+
     function renderStudyOverviewRows(items) {
       var list = document.getElementById('study-overview-list');
       list.innerHTML = '';
+      var removeMode = isKolekcjaTabActive();
       items.forEach(function (item) {
         var row = document.createElement('div');
         row.className = 'study-row';
@@ -1126,14 +1220,22 @@
 
         var btn = document.createElement('button');
         btn.type = 'button';
-        btn.textContent = 'Wstaw';
-        btn.onclick = (function (it) {
-          return function () {
-            var key = it.key || it.item_key || '';
-            var ids = it.doi ? { type: 'doi', value: it.doi } : {};
-            pasteItemCitation(key, ids, it.citation_text, formatCiteHoverTitle(it));
-          };
-        })(item);
+        if (removeMode) {
+          btn.className = 'collection-remove-btn';
+          btn.textContent = 'Usuń';
+          btn.onclick = (function (it) {
+            return function () { removeKolekcjaItem(it); };
+          })(item);
+        } else {
+          btn.textContent = 'Wstaw';
+          btn.onclick = (function (it) {
+            return function () {
+              var key = it.key || it.item_key || '';
+              var ids = it.doi ? { type: 'doi', value: it.doi } : {};
+              pasteItemCitation(key, ids, it.citation_text, formatCiteHoverTitle(it));
+            };
+          })(item);
+        }
 
         row.appendChild(title);
         row.appendChild(btn);
@@ -1141,13 +1243,20 @@
       });
     }
 
-    function applyStudyOverviewFilter() {
+    function applyStudyOverviewFilter(keepPage) {
       var query = studyOverviewState.searchQuery;
       var allItems = studyOverviewState.allItems;
       var filtered = filterStudyItems(allItems, query);
+      studyOverviewState.filteredItems = filtered;
+      if (!keepPage) {
+        studyOverviewState.page = 0;
+      }
       var filtering = !!String(query || '').trim();
       updateStudyFilterCount(filtered.length, allItems.length, filtering);
-      renderStudyOverviewRows(filtered);
+      var start = studyOverviewState.page * COLLECTION_PAGE_SIZE;
+      var pageItems = filtered.slice(start, start + COLLECTION_PAGE_SIZE);
+      renderStudyOverviewRows(pageItems);
+      updateStudyOverviewPager();
     }
 
     function onStudyOverviewSearchInput() {
@@ -1157,7 +1266,7 @@
       clearTimeout(studyOverviewState.searchTimer);
       studyOverviewState.searchTimer = setTimeout(function () {
         studyOverviewState.searchQuery = input.value;
-        applyStudyOverviewFilter();
+        applyStudyOverviewFilter(false);
       }, 150);
     }
 
@@ -1167,7 +1276,7 @@
       input.value = '';
       studyOverviewState.searchQuery = '';
       updateStudySearchClearButton();
-      applyStudyOverviewFilter();
+      applyStudyOverviewFilter(false);
       input.focus();
     }
 
@@ -1186,17 +1295,17 @@
       meta = meta || {};
       var box = document.getElementById('study-overview');
       var dedupNote = document.getElementById('study-doi-dedup-note');
+      studyOverviewState.allItems = items || [];
+      studyOverviewState.meta = meta;
+      studyOverviewState.page = 0;
       if (!items || !items.length) {
         box.style.display = 'none';
-        studyOverviewState.allItems = [];
-        studyOverviewState.meta = {};
         document.getElementById('study-overview-list').innerHTML = '';
         if (dedupNote) dedupNote.style.display = 'none';
         updateStudyFilterCount(0, 0, false);
+        updateStudyOverviewPager();
         return;
       }
-      studyOverviewState.allItems = items;
-      studyOverviewState.meta = meta;
       if (dedupNote) {
         if (meta.hidden_duplicate_dois) {
           dedupNote.style.display = 'block';
@@ -1210,8 +1319,14 @@
             'Zotero nie blokuje natywnie duplikatów DOI w kolekcji — ten panel ukrywa powtórki na liście.';
         }
       }
-      applyStudyOverviewFilter();
-      box.style.display = 'block';
+      applyStudyOverviewFilter(false);
+      var active = document.querySelector('.tab.active');
+      var activeId = active && active.id ? active.id : '';
+      if (activeId === 'tab-settings' || activeId === 'tab-biblio') {
+        box.style.display = 'none';
+      } else {
+        box.style.display = 'block';
+      }
     }
 
     function loadStudyOverview() {
@@ -1249,7 +1364,7 @@
             })
             .getSessionItems();
         })
-        .getCollectionItems(appState.defaultCollection.key, 15);
+        .getCollectionItems(appState.defaultCollection.key);
     }
 
     var kolekcjaState = {
@@ -1396,29 +1511,6 @@
       applyKolekcjaFilter();
     }
 
-    function loadKolekcjaTab() {
-      if (!appState.defaultCollection.key) {
-        renderKolekcjaTab([]);
-        return;
-      }
-      setKolekcjaLoading(true);
-      google.script.run
-        .withSuccessHandler(function (data) {
-          setKolekcjaLoading(false);
-          var items = (data && data.items) || [];
-          renderKolekcjaTab(items, {
-            hidden_duplicate_dois: data && data.hidden_duplicate_dois,
-            doi_dedup_note: data && data.doi_dedup_note,
-          });
-        })
-        .withFailureHandler(function (e) {
-          setKolekcjaLoading(false);
-          renderKolekcjaTab([]);
-          setStatus(formatScriptError(e), true);
-        })
-        .getCollectionItems(appState.defaultCollection.key, 50);
-    }
-
     function removeKolekcjaItem(item) {
       if (!appState.defaultCollection.key) {
         setStatus('Ustaw kolekcję tego dokumentu w zakładce Ustawienia.', true);
@@ -1443,11 +1535,10 @@
         .withSuccessHandler(function (r) {
           if (r && r.removed) {
             setStatus('Usunięto z kolekcji: ' + label);
-            loadKolekcjaTab();
             loadStudyOverview();
           } else if (r && r.reason === 'not_in_collection') {
             setStatus('Pozycja nie jest już w tej kolekcji.', true);
-            loadKolekcjaTab();
+            loadStudyOverview();
           } else {
             setStatus('Nie udało się usunąć pozycji z kolekcji.', true);
           }
@@ -1456,6 +1547,11 @@
           setStatus(formatScriptError(e), true);
         })
         .removeFromCollection(appState.defaultCollection.key, itemKey);
+    }
+
+    function loadKolekcjaTab() {
+      // Alias — jedna wspólna lista (study-overview).
+      loadStudyOverview();
     }
 
     function hidePostImport() {
@@ -1516,24 +1612,49 @@
         empty.textContent = '(brak stylów)';
         sel.appendChild(empty);
         sel.disabled = true;
+        updateBibliographyStyleExample('');
         return;
       }
       styles.forEach(function (s) {
         var opt = document.createElement('option');
         opt.value = s.id;
-        opt.textContent = s.label || s.id;
+        var label = s.label || s.id;
+        if (s.example) {
+          label += ' — np. ' + s.example;
+        }
+        opt.textContent = label;
+        if (s.example) opt.title = 'Przykład w tekście: ' + s.example;
         if (selectedId && s.id === selectedId) {
           opt.selected = true;
         }
         sel.appendChild(opt);
       });
       sel.disabled = false;
-      // Sam wybór stylu nic nie przelicza — robi to dopiero „Zmień styl”,
-      // żeby przypadkowe kliknięcie nie przepisało całego dokumentu.
       sel.onchange = function () {
         var styleId = sel.value;
         if (styleId) persistBibliographyStyle(styleId);
+        updateBibliographyStyleExample(styleId);
       };
+      updateBibliographyStyleExample(sel.value || selectedId || '');
+    }
+
+    function updateBibliographyStyleExample(styleId) {
+      var el = document.getElementById('biblio-style-example');
+      if (!el) return;
+      var styles = appState.bibliographyStyles || [];
+      var found = null;
+      for (var i = 0; i < styles.length; i++) {
+        if (styles[i].id === styleId) {
+          found = styles[i];
+          break;
+        }
+      }
+      if (found && found.example) {
+        el.innerHTML = 'Przykład w tekście: <code>' + found.example + '</code>' +
+          (found.label ? ' (' + found.label + ')' : '');
+      } else {
+        el.textContent = 'Przykład w tekście: —';
+      }
     }
 
     function loadDocumentPreferences() {
@@ -1885,7 +2006,6 @@
       } else {
         showSetupWarning('');
         loadStudyOverview();
-        loadKolekcjaTab();
       }
     }
 
@@ -2559,14 +2679,12 @@
             return;
           }
           var itemKey = r.item_key || '';
-          var msg = 'Utworzono: ' + (r.title || payload.title) + ' → ' + label;
-          if (r.placeholder_replaced) msg += ' (zamieniono placeholder)';
-          setStatus(msg, !!r.placeholder_error);
+          var msg = 'Utworzono w zbiorze: ' + (r.title || payload.title) + ' → ' + label +
+            ' (bez zmian w tekście dokumentu)';
+          setStatus(msg, false);
           showPostImport(r.doi || '', itemKey, label, {
             citationText: r.citation_text || '',
             hoverTitle: r.title || payload.title || '',
-            placeholderReplaced: r.placeholder_replaced,
-            placeholderError: r.placeholder_error,
             identifiers: r.doi ? { type: 'doi', value: r.doi } : { type: 'title', value: r.title || payload.title }
           });
           loadStudyOverview();
@@ -2622,18 +2740,11 @@
     }
 
     function finishDoiImport(r, itemKey, label) {
-      var msg = 'Dodano DOI: ' + r.doi + ' → ' + label;
-      if (r.placeholder_replaced) {
-        msg += ' (zamieniono placeholder)';
-      } else if (r.placeholder_error) {
-        msg += '\n' + r.placeholder_error;
-      }
-      setStatus(msg, !!r.placeholder_error);
+      var msg = 'Dodano do zbioru: ' + r.doi + ' → ' + label + ' (bez zmian w tekście dokumentu)';
+      setStatus(msg, false);
       showPostImport(r.doi, itemKey, label, {
         citationText: r.citation_text || '',
         hoverTitle: r.title || r.citation_text || '',
-        placeholderReplaced: r.placeholder_replaced,
-        placeholderError: r.placeholder_error,
         identifiers: { type: 'doi', value: r.doi },
       });
       loadStudyOverview();
@@ -2652,19 +2763,125 @@
       }
       var target = resolveImportTarget('study-orcid');
       if (!target) return;
-      setStatus('Importuję prace ORCID… (może potrwać)');
+      document.getElementById('btn-import-orcid').disabled = true;
+      setStatus('Pobieram listę prac z ORCID…');
       google.script.run
-        .withSuccessHandler(function (r) {
-          var s = r.summary || {};
-          setStatus(
-            'ORCID: dodano ' + (s.added_count || 0) +
-            ', pominięto ' + (s.skipped_count || 0) +
-            ' (w tym duplikaty), błędy ' + (s.error_count || 0)
-          );
-          loadStudyOverview();
+        .withSuccessHandler(function (plan) {
+          var works = (plan && plan.works) || [];
+          var skippedNoDoi = (plan && plan.skipped) || [];
+          if (plan && plan.errors && plan.errors.length && !works.length) {
+            document.getElementById('btn-import-orcid').disabled = !appState.defaultCollection.key;
+            setStatus(
+              'Nie udało się pobrać ORCID: ' +
+                ((plan.errors[0] && plan.errors[0].message) || 'błąd'),
+              true
+            );
+            return;
+          }
+          if (!works.length) {
+            document.getElementById('btn-import-orcid').disabled = !appState.defaultCollection.key;
+            setStatus(
+              'Brak DOI w profilu ORCID (pominięto bez DOI: ' + skippedNoDoi.length + ').',
+              true
+            );
+            return;
+          }
+          runOrcidChunkImport(works, skippedNoDoi, target, 0, {
+            added: [],
+            skipped: skippedNoDoi.slice(),
+            errors: [],
+          });
         })
-        .withFailureHandler(function (e) { setStatus(e.message, true); })
-        .importOrcid(orcid, target, limit);
+        .withFailureHandler(function (e) {
+          document.getElementById('btn-import-orcid').disabled = !appState.defaultCollection.key;
+          setStatus(formatScriptError(e), true);
+        })
+        .planOrcidImport(orcid, limit);
+    }
+
+    function runOrcidChunkImport(works, skippedNoDoi, target, index, acc) {
+      var total = works.length;
+      if (index >= total) {
+        document.getElementById('btn-import-orcid').disabled = !appState.defaultCollection.key;
+        var lines = [
+          'ORCID zakończone: dodano ' + acc.added.length +
+          ', pominięto ' + acc.skipped.length +
+          ', błędy ' + acc.errors.length +
+          ' (z ' + total + ' DOI)'
+        ];
+        if (acc.added.length) {
+          lines.push('Dodane DOI: ' + acc.added.slice(0, 8).join(', ') +
+            (acc.added.length > 8 ? '…' : ''));
+        }
+        if (acc.skipped.length) {
+          var reasons = {};
+          acc.skipped.forEach(function (row) {
+            var reason = (row && row.reason) || 'inne';
+            reasons[reason] = (reasons[reason] || 0) + 1;
+          });
+          lines.push('Pominięte: ' + Object.keys(reasons).map(function (k) {
+            return k + '×' + reasons[k];
+          }).join(', '));
+        }
+        if (acc.errors.length) {
+          lines.push('Błędy (po 3 próbach):');
+          acc.errors.slice(0, 5).forEach(function (err) {
+            lines.push('• ' + ((err && err.doi) || '?') + ' — ' + ((err && err.message) || 'błąd'));
+          });
+          if (acc.errors.length > 5) {
+            lines.push('…i ' + (acc.errors.length - 5) + ' więcej');
+          }
+        }
+        setStatus(lines.join('\n'), acc.errors.length > 0 && acc.added.length === 0);
+        loadStudyOverview();
+        return;
+      }
+
+      var work = works[index];
+      var doi = work.doi || '';
+      var title = work.title || '';
+      setStatus(
+        'ORCID postęp: ' + (index + 1) + '/' + total +
+        ' · dodano ' + acc.added.length +
+        ' · pominięto ' + acc.skipped.length +
+        ' · błędy ' + acc.errors.length +
+        '\nTeraz: ' + doi + (title ? ' — ' + truncateTitle(title, 40) : '')
+      );
+
+      google.script.run
+        .withSuccessHandler(function (pack) {
+          if (pack && pack.ok && pack.result) {
+            var r = pack.result;
+            if (r.duplicate) {
+              acc.skipped.push({
+                doi: doi,
+                title: title,
+                reason: 'już w kolekcji',
+                item_key: r.item_key || r.key || '',
+              });
+            } else {
+              acc.added.push(doi);
+            }
+          } else {
+            acc.errors.push({
+              doi: doi,
+              title: title,
+              message: (pack && pack.error) || 'błąd importu',
+              retries: (pack && pack.retries) || 3,
+            });
+          }
+          runOrcidChunkImport(works, skippedNoDoi, target, index + 1, acc);
+        })
+        .withFailureHandler(function (e) {
+          acc.errors.push({
+            doi: doi,
+            title: title,
+            message: formatScriptError(e),
+            retries: 3,
+          });
+          runOrcidChunkImport(works, skippedNoDoi, target, index + 1, acc);
+        })
+        .importDoiWithRetry(doi, target, 3);
     }
 
     function loadStatus() {
@@ -2680,7 +2897,7 @@
 
     function boot() {
       initStudyOverviewSearch();
-      initKolekcjaSearch();
+      // initKolekcjaSearch usunięte — jedna lista study-overview
       setStatus('Ładowanie…');
       checkAddonVersion();
       startHealthPolling();

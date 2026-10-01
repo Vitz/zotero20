@@ -15,7 +15,7 @@ from .services.bibliography import (
     resolve_style_id,
     style_label,
 )
-from .services.orcid import import_orcid_works
+from .services.orcid import import_orcid_works, plan_orcid_works
 from .services.studies import StudiesConfigError, list_studies, resolve_collection_key
 from .services.exceptions import ZoteroClientError
 from .services.debug_trace import (
@@ -422,6 +422,41 @@ def import_doi(request):
 
 
 @json_api
+def import_orcid_plan(request):
+    """Lista DOI z ORCID bez zapisu — do chunkowanego importu w sidebarze."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
+
+    body = parse_json_body(request)
+    if body is None:
+        return JsonResponse({"error": "Nieprawidłowy JSON."}, status=400)
+
+    orcid_raw = body.get("orcid", "")
+    limit = int(body.get("limit", 50))
+    if not orcid_raw:
+        return JsonResponse({"error": "Wymagane pole: orcid."}, status=400)
+
+    orcid = normalize_orcid(orcid_raw)
+    if not orcid:
+        if normalize_doi(orcid_raw):
+            return JsonResponse(
+                {
+                    "error": (
+                        "To wygląda na DOI artykułu, nie identyfikator ORCID. "
+                        "Użyj zakładki „Pojedynczy DOI”."
+                    )
+                },
+                status=400,
+            )
+        return JsonResponse({"error": "Nieprawidłowy format ORCID."}, status=400)
+
+    limit = max(1, min(limit, 200))
+    payload = plan_orcid_works(orcid, limit=limit)
+    status = 200 if not payload.get("errors") else 502
+    return JsonResponse(payload, status=status)
+
+
+@json_api
 def import_orcid(request):
     if request.method != "POST":
         return JsonResponse({"error": "Metoda niedozwolona."}, status=405)
@@ -627,13 +662,21 @@ def collection_items(request):
     if not collection_key:
         return JsonResponse({"error": "Wymagany parametr: collection_key."}, status=400)
 
+    fetch_all = (request.GET.get("all") or "").strip().lower() in ("1", "true", "yes")
     limit = int(request.GET.get("limit", 20))
     limit = max(1, min(limit, 100))
+    start = int(request.GET.get("start", 0))
+    start = max(0, start)
 
     dedupe = request.GET.get("dedupe_doi", "1") not in ("0", "false", "no")
     client, source = get_zotero_client()
     try:
-        items = client.list_collection_items(collection_key, limit=limit)
+        if fetch_all:
+            items = client.list_all_collection_items(collection_key)
+        else:
+            items = client.list_collection_items(
+                collection_key, limit=limit, start=start
+            )
     except ZoteroClientError as exc:
         return JsonResponse({"error": str(exc)}, status=502)
 
@@ -645,6 +688,8 @@ def collection_items(request):
         "collection_key": collection_key,
         "source": source,
         "items": items,
+        "total": len(items),
+        "all": fetch_all,
     }
     if hidden_duplicates:
         response["hidden_duplicate_dois"] = hidden_duplicates

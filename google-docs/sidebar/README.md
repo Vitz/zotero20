@@ -1,7 +1,7 @@
 # Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
-Wersja plików Apps Script: **2.2.4** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+Wersja plików Apps Script: **2.2.6** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
 
 ## Co robi panel
 
@@ -126,7 +126,10 @@ Panel pokazuje obie kropki statusu (API / Zotero) przy tytule i odświeża je co
 | `GET /items/<key>?style=&locale=` | tekst cytowania pojedynczej pozycji (`locale`: `en-US` / `pl-PL`, domyślnie `en-US`) |
 | `POST /citations` | cytowania w tekście **i** bibliografia dla listy `item_keys` (jeden styl + `locale`) |
 | `POST /bibliography` | bibliografia z `item_keys` albo z `collection_key` (tryb awaryjny) |
-| `POST /import/manual` | ręczne utworzenie pozycji (zakładka Inne) |
+| `POST /import/manual` | ręczne utworzenie pozycji (zakładka Inne) — tylko do kolekcji, bez zamiany `[*]` |
+| `POST /import/doi` | import DOI do kolekcji (bez zamiany `[*]` w Docs) |
+| `POST /import/orcid/plan` | lista DOI z ORCID bez zapisu (progress w sidebarze) |
+| `POST /import/orcid` | import ORCID batch na serwerze (retry ×3) |
 | `POST /import/describe` | Gemini → draft (fallback serwerowy; preferowane: bezpośrednie Gemini z Apps Script 2.2.4+) |
 
 ## Troubleshooting

@@ -84,6 +84,59 @@ def extract_doi_from_work(work: dict) -> str | None:
     return None
 
 
+def plan_orcid_works(orcid: str, limit: int = 50) -> dict:
+    """Pobiera listę DOI z ORCID bez zapisu do Zotero (do chunkowanego importu)."""
+    limit = max(1, min(limit, 200))
+    works_out: list[dict] = []
+    skipped: list[dict] = []
+    try:
+        works = fetch_orcid_works(orcid)
+    except requests.RequestException as exc:
+        return {
+            "orcid": orcid,
+            "works": [],
+            "skipped": [],
+            "errors": [{"stage": "orcid_fetch", "message": str(exc)}],
+            "summary": {
+                "works_count": 0,
+                "skipped_count": 0,
+                "error_count": 1,
+            },
+        }
+
+    for work in works[:limit]:
+        title = (work.get("title") or {}).get("title", {}).get("value", "")
+        doi = extract_doi_from_work(work)
+        if not doi:
+            skipped.append(
+                {
+                    "title": title,
+                    "reason": "brak DOI",
+                    "put_code": work.get("put-code"),
+                }
+            )
+            continue
+        works_out.append(
+            {
+                "doi": doi,
+                "title": title,
+                "put_code": work.get("put-code"),
+            }
+        )
+
+    return {
+        "orcid": orcid,
+        "works": works_out,
+        "skipped": skipped,
+        "errors": [],
+        "summary": {
+            "works_count": len(works_out),
+            "skipped_count": len(skipped),
+            "error_count": 0,
+        },
+    }
+
+
 def import_orcid_works(
     orcid: str,
     study: str,
@@ -117,21 +170,46 @@ def import_orcid_works(
             )
             continue
 
-        try:
-            result = client.add_item_by_id(doi, collection_key)
-            if isinstance(result, dict) and result.get("duplicate"):
-                report.skipped.append(
-                    {
-                        "doi": doi,
-                        "title": title,
-                        "reason": "już w kolekcji",
-                        "item_key": result.get("key", ""),
-                    }
+        result = None
+        last_error: Exception | None = None
+        for attempt in range(1, 4):
+            try:
+                result = client.add_item_by_id(doi, collection_key)
+                last_error = None
+                break
+            except ZoteroClientError as exc:
+                last_error = exc
+                logger.warning(
+                    "ORCID import DOI %s attempt %s/3 failed: %s",
+                    doi,
+                    attempt,
+                    exc,
                 )
-                continue
-            report.added.append(doi)
-            time.sleep(settings.ORCID_RATE_LIMIT_DELAY)
-        except ZoteroClientError as exc:
-            report.errors.append({"doi": doi, "title": title, "message": str(exc)})
+                if attempt < 3:
+                    time.sleep(settings.ORCID_RATE_LIMIT_DELAY * attempt)
+
+        if last_error is not None:
+            report.errors.append(
+                {
+                    "doi": doi,
+                    "title": title,
+                    "message": str(last_error),
+                    "retries": 3,
+                }
+            )
+            continue
+
+        if isinstance(result, dict) and result.get("duplicate"):
+            report.skipped.append(
+                {
+                    "doi": doi,
+                    "title": title,
+                    "reason": "już w kolekcji",
+                    "item_key": result.get("key", ""),
+                }
+            )
+            continue
+        report.added.append(doi)
+        time.sleep(settings.ORCID_RATE_LIMIT_DELAY)
 
     return report

@@ -1,7 +1,7 @@
 # Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
-Wersja plików Apps Script: **2.2.6** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+Wersja plików Apps Script: **2.2.7** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
 
 ## Co robi panel
 
@@ -60,6 +60,15 @@ Apps Script nie ma API do pól dokumentu — kotwica-link to najbliższy możliw
 
 Jeśli skopiujesz tylko jeden plik, panel wyświetli czerwone ostrzeżenie o niezgodnych wersjach —
 to zabezpieczenie przed „naprawami, które nie działają, bo w Docs jest stary kod”.
+
+## Add-on (wiele dokumentów)
+
+Żeby panel był w **wielu** Docs naraz (bez kopiowania skryptu do każdego pliku),
+opublikuj jako **Editor Add-on** (prywatny / test):
+
+→ **[docs/google-workspace-addon.md](../../docs/google-workspace-addon.md)**
+
+Skrót: `onInstall` + `clasp push` + Deploy → Test deployments **albo** Marketplace Internal (Workspace).
 
 ## Script Properties
 

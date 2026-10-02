@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.2.6';
+const ADDON_VERSION = '2.2.8';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -113,6 +113,14 @@ function onOpen() {
     .addToUi();
 }
 
+/**
+ * Wymagane dla instalacji jako add-on (Editor Add-on).
+ * Przy instalacji Google wywołuje onInstall zamiast samego onOpen.
+ */
+function onInstall(e) {
+  onOpen(e);
+}
+
 function showSidebar() {
   const html = HtmlService.createHtmlOutputFromFile('Sidebar')
     .setTitle('Zotero20 Import')
@@ -216,13 +224,25 @@ function importOrcid(orcid, options, limit) {
 
 /**
  * Plan importu ORCID: lista DOI bez zapisu do Zotero.
- * Używane przez sidebar do chunkowanego importu z progressem.
+ * Gdy serwer nie ma jeszcze /import/orcid/plan (HTTP 404), zwraca
+ * { fallback: true } — sidebar używa wtedy klasycznego POST /import/orcid.
  */
 function planOrcidImport(orcid, limit) {
-  return apiPost('/import/orcid/plan', {
-    orcid: orcid,
-    limit: limit || 50,
-  });
+  try {
+    return apiPost('/import/orcid/plan', {
+      orcid: orcid,
+      limit: limit || 50,
+    });
+  } catch (e) {
+    var msg = String((e && e.message) || e || '');
+    if (/\b404\b/.test(msg) || /not found/i.test(msg)) {
+      return {
+        fallback: true,
+        reason: 'Server bez /import/orcid/plan — używam klasycznego importu ORCID.',
+      };
+    }
+    throw e;
+  }
 }
 
 /**

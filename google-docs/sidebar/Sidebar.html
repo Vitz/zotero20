@@ -554,7 +554,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.2.6';
+    var SIDEBAR_VERSION = '2.2.8';
 
     // UrlFetchApp: health co 5 min (wcześniej 3 s paliło dzienny limit).
     var HEALTH_POLL_MS = 300000;
@@ -2767,6 +2767,40 @@
       setStatus('Pobieram listę prac z ORCID…');
       google.script.run
         .withSuccessHandler(function (plan) {
+          if (plan && plan.fallback) {
+            setStatus('Serwer bez /orcid/plan — import klasyczny (retry ×3 na serwerze)…');
+            google.script.run
+              .withSuccessHandler(function (r) {
+                document.getElementById('btn-import-orcid').disabled = !appState.defaultCollection.key;
+                var s = r.summary || {};
+                var added = s.added_count || (r.added && r.added.length) || 0;
+                var skipped = s.skipped_count || (r.skipped && r.skipped.length) || 0;
+                var errors = s.error_count || (r.errors && r.errors.length) || 0;
+                var lines = [
+                  'ORCID zakończone (tryb klasyczny): dodano ' + added +
+                  ', pominięto ' + skipped +
+                  ', błędy ' + errors
+                ];
+                if (r.added && r.added.length) {
+                  lines.push('Dodane DOI: ' + r.added.slice(0, 8).join(', ') +
+                    (r.added.length > 8 ? '…' : ''));
+                }
+                if (r.errors && r.errors.length) {
+                  lines.push('Błędy (po 3 próbach na serwerze):');
+                  r.errors.slice(0, 5).forEach(function (err) {
+                    lines.push('• ' + ((err && err.doi) || '?') + ' — ' + ((err && err.message) || 'błąd'));
+                  });
+                }
+                setStatus(lines.join('\n'), errors > 0 && added === 0);
+                loadStudyOverview();
+              })
+              .withFailureHandler(function (e) {
+                document.getElementById('btn-import-orcid').disabled = !appState.defaultCollection.key;
+                setStatus(formatScriptError(e), true);
+              })
+              .importOrcid(orcid, target, limit);
+            return;
+          }
           var works = (plan && plan.works) || [];
           var skippedNoDoi = (plan && plan.skipped) || [];
           if (plan && plan.errors && plan.errors.length && !works.length) {

@@ -4,30 +4,97 @@ from __future__ import annotations
 
 from typing import Any
 
-# Typy obsługiwane w v1 (P0 + łatwe rozszerzenia).
+# Wszystkie regularne typy Zotero (bez note / attachment / annotation).
 ALLOWED_ITEM_TYPES: frozenset[str] = frozenset(
     {
-        "preprint",
         "journalArticle",
+        "encyclopediaArticle",
+        "newspaperArticle",
+        "magazineArticle",
+        "radioBroadcast",
+        "document",
+        "artwork",
+        "email",
+        "film",
+        "dictionaryEntry",
+        "instantMessage",
         "book",
-        "bookSection",
+        "letter",
+        "map",
+        "conferencePaper",
+        "audioRecording",
+        "videoRecording",
+        "standard",
+        "computerProgram",
+        "patent",
+        "podcast",
         "thesis",
+        "preprint",
+        "presentation",
+        "tvBroadcast",
+        "bill",
         "report",
+        "bookSection",
+        "hearing",
+        "manuscript",
+        "case",
+        "statute",
         "webpage",
+        "forumPost",
+        "blogPost",
+        "interview",
+        "dataset",
     }
 )
 
 ITEM_TYPE_LABELS_PL: dict[str, str] = {
-    "preprint": "Preprint / artykuł bez DOI",
     "journalArticle": "Artykuł (bez DOI)",
+    "encyclopediaArticle": "Artykuł w encyklopedii",
+    "newspaperArticle": "Artykuł z gazety",
+    "magazineArticle": "Artykuł z magazynu",
+    "radioBroadcast": "Audycja radiowa",
+    "document": "Dokument",
+    "artwork": "Dzieło sztuki",
+    "email": "E-mail",
+    "film": "Film",
+    "dictionaryEntry": "Hasło słownikowe",
+    "instantMessage": "Krótka wiadomość",
     "book": "Książka",
-    "bookSection": "Rozdział książki",
+    "letter": "List",
+    "map": "Mapa",
+    "conferencePaper": "Materiał konferencyjny",
+    "audioRecording": "Nagranie audio",
+    "videoRecording": "Nagranie wideo",
+    "standard": "Norma",
+    "computerProgram": "Oprogramowanie",
+    "patent": "Patent",
+    "podcast": "Podcast",
     "thesis": "Praca dyplomowa",
+    "preprint": "Preprint / artykuł bez DOI",
+    "presentation": "Prezentacja",
+    "tvBroadcast": "Program telewizyjny",
+    "bill": "Projekt ustawy",
     "report": "Raport",
+    "bookSection": "Rozdział książki",
+    "hearing": "Rozprawa",
+    "manuscript": "Rękopis",
+    "case": "Sprawa sądowa",
+    "statute": "Statut",
     "webpage": "Strona WWW",
+    "forumPost": "Wpis na forum",
+    "blogPost": "Wpis w blogu",
+    "interview": "Wywiad",
+    "dataset": "Zestaw danych",
 }
 
-# Pola wspólne dla wszystkich typów (poza itemType / collections).
+# Typy bez pola title — wymagany alias poniżej.
+TITLE_FIELD_BY_TYPE: dict[str, str] = {
+    "case": "caseName",
+    "statute": "nameOfAct",
+    "email": "subject",
+}
+
+# Pola wspólne (title dokładany osobno / przez alias).
 _COMMON_FIELDS: frozenset[str] = frozenset(
     {
         "title",
@@ -41,82 +108,491 @@ _COMMON_FIELDS: frozenset[str] = frozenset(
         "accessDate",
         "rights",
         "shortTitle",
+        "citationKey",
+        "archive",
+        "archiveLocation",
+        "libraryCatalog",
+        "callNumber",
     }
 )
 
 _TYPE_FIELDS: dict[str, frozenset[str]] = {
-    "preprint": frozenset({"repository", "archiveID", "archive", "libraryCatalog", "callNumber"}),
     "journalArticle": frozenset(
         {
+            "ISSN",
+            "PMCID",
+            "PMID",
+            "issue",
+            "journalAbbreviation",
+            "pages",
+            "partNumber",
+            "partTitle",
+            "place",
             "publicationTitle",
+            "publisher",
+            "section",
+            "series",
+            "seriesText",
+            "seriesTitle",
             "volume",
+        }
+    ),
+    "encyclopediaArticle": frozenset(
+        {
+            "ISBN",
+            "edition",
+            "encyclopediaTitle",
+            "numberOfVolumes",
+            "pages",
+            "place",
+            "publisher",
+            "series",
+            "seriesNumber",
+            "volume",
+        }
+    ),
+    "newspaperArticle": frozenset(
+        {
+            "ISSN",
+            "edition",
             "issue",
             "pages",
-            "series",
-            "seriesTitle",
-            "seriesText",
-            "journalAbbreviation",
+            "place",
+            "publicationTitle",
+            "publisher",
+            "section",
+            "volume",
+        }
+    ),
+    "magazineArticle": frozenset(
+        {
             "ISSN",
+            "issue",
+            "pages",
+            "place",
+            "publicationTitle",
+            "publisher",
+            "volume",
+        }
+    ),
+    "radioBroadcast": frozenset(
+        {
+            "audioRecordingFormat",
+            "episodeNumber",
+            "network",
+            "place",
+            "programTitle",
+            "runningTime",
+        }
+    ),
+    "document": frozenset(
+        {
+            "place",
+            "publisher",
+            "type",
+        }
+    ),
+    "artwork": frozenset(
+        {
+            "artworkMedium",
+            "artworkSize",
+            "eventPlace",
+        }
+    ),
+    "email": frozenset(
+        {
+            "subject",
+        }
+    ),
+    "film": frozenset(
+        {
+            "distributor",
+            "genre",
+            "place",
+            "runningTime",
+            "videoRecordingFormat",
+        }
+    ),
+    "dictionaryEntry": frozenset(
+        {
+            "ISBN",
+            "dictionaryTitle",
+            "edition",
+            "numberOfVolumes",
+            "pages",
+            "place",
+            "publisher",
+            "series",
+            "seriesNumber",
+            "volume",
+        }
+    ),
+    "instantMessage": frozenset(
+        {
         }
     ),
     "book": frozenset(
         {
-            "publisher",
-            "place",
             "ISBN",
-            "numPages",
+            "ISSN",
             "edition",
-            "volume",
+            "format",
+            "numPages",
+            "numberOfVolumes",
+            "originalDate",
+            "originalPlace",
+            "originalPublisher",
+            "place",
+            "publisher",
             "series",
             "seriesNumber",
+            "volume",
+        }
+    ),
+    "letter": frozenset(
+        {
+            "eventPlace",
+            "letterType",
+        }
+    ),
+    "map": frozenset(
+        {
+            "ISBN",
+            "edition",
+            "mapType",
+            "place",
+            "publisher",
+            "scale",
+            "seriesTitle",
+        }
+    ),
+    "conferencePaper": frozenset(
+        {
+            "ISBN",
+            "ISSN",
+            "conferenceName",
+            "eventPlace",
+            "issue",
+            "numberOfVolumes",
+            "pages",
+            "place",
+            "proceedingsTitle",
+            "publisher",
+            "series",
+            "seriesNumber",
+            "volume",
+        }
+    ),
+    "audioRecording": frozenset(
+        {
+            "ISBN",
+            "audioRecordingFormat",
+            "label",
+            "numberOfVolumes",
+            "place",
+            "runningTime",
+            "seriesTitle",
+            "volume",
+        }
+    ),
+    "videoRecording": frozenset(
+        {
+            "ISBN",
+            "numberOfVolumes",
+            "place",
+            "runningTime",
+            "seriesTitle",
+            "studio",
+            "videoRecordingFormat",
+            "volume",
+        }
+    ),
+    "standard": frozenset(
+        {
+            "ISBN",
+            "committee",
+            "edition",
+            "numPages",
+            "number",
+            "organization",
+            "partNumber",
+            "partTitle",
+            "place",
+            "publisher",
+            "status",
+            "type",
+            "versionNumber",
+        }
+    ),
+    "computerProgram": frozenset(
+        {
+            "ISBN",
+            "company",
+            "place",
+            "programmingLanguage",
+            "seriesTitle",
+            "system",
+            "versionNumber",
+        }
+    ),
+    "patent": frozenset(
+        {
+            "applicationNumber",
+            "assignee",
+            "country",
+            "filingDate",
+            "issueDate",
+            "issuingAuthority",
+            "legalStatus",
+            "pages",
+            "patentNumber",
+            "place",
+            "priorityDate",
+            "priorityNumbers",
+            "references",
+        }
+    ),
+    "podcast": frozenset(
+        {
+            "audioFileType",
+            "episodeNumber",
+            "place",
+            "publisher",
+            "runningTime",
+            "seriesTitle",
+        }
+    ),
+    "thesis": frozenset(
+        {
+            "ISBN",
+            "ISSN",
+            "numPages",
+            "place",
+            "series",
+            "seriesNumber",
+            "thesisType",
+            "university",
+        }
+    ),
+    "preprint": frozenset(
+        {
+            "archiveID",
+            "genre",
+            "place",
+            "repository",
+            "series",
+            "seriesNumber",
+        }
+    ),
+    "presentation": frozenset(
+        {
+            "meetingName",
+            "place",
+            "presentationType",
+            "series",
+            "sessionTitle",
+        }
+    ),
+    "tvBroadcast": frozenset(
+        {
+            "episodeNumber",
+            "network",
+            "place",
+            "programTitle",
+            "runningTime",
+            "videoRecordingFormat",
+        }
+    ),
+    "bill": frozenset(
+        {
+            "billNumber",
+            "code",
+            "codePages",
+            "codeVolume",
+            "history",
+            "legislativeBody",
+            "section",
+            "session",
+        }
+    ),
+    "report": frozenset(
+        {
+            "ISBN",
+            "ISSN",
+            "institution",
+            "pages",
+            "place",
+            "reportNumber",
+            "reportType",
+            "seriesNumber",
+            "seriesTitle",
         }
     ),
     "bookSection": frozenset(
         {
-            "bookTitle",
-            "publisher",
-            "place",
             "ISBN",
-            "pages",
+            "ISSN",
+            "bookTitle",
             "edition",
+            "format",
+            "numberOfVolumes",
+            "originalDate",
+            "originalPlace",
+            "originalPublisher",
+            "pages",
+            "place",
+            "publisher",
             "series",
             "seriesNumber",
             "volume",
         }
     ),
-    "thesis": frozenset({"university", "place", "thesisType", "numPages"}),
-    "report": frozenset(
+    "hearing": frozenset(
         {
-            "institution",
-            "reportNumber",
-            "place",
+            "committee",
+            "documentNumber",
+            "history",
+            "legislativeBody",
+            "numberOfVolumes",
             "pages",
-            "seriesTitle",
-            "seriesNumber",
+            "place",
+            "publisher",
+            "session",
         }
     ),
-    "webpage": frozenset({"websiteTitle", "websiteType"}),
+    "manuscript": frozenset(
+        {
+            "institution",
+            "manuscriptType",
+            "numPages",
+            "number",
+            "place",
+        }
+    ),
+    "case": frozenset(
+        {
+            "caseName",
+            "court",
+            "dateDecided",
+            "docketNumber",
+            "firstPage",
+            "history",
+            "reporter",
+            "reporterVolume",
+        }
+    ),
+    "statute": frozenset(
+        {
+            "code",
+            "codeNumber",
+            "dateEnacted",
+            "history",
+            "nameOfAct",
+            "pages",
+            "publicLawNumber",
+            "section",
+            "session",
+        }
+    ),
+    "webpage": frozenset(
+        {
+            "place",
+            "publisher",
+            "websiteTitle",
+            "websiteType",
+        }
+    ),
+    "forumPost": frozenset(
+        {
+            "forumTitle",
+            "postType",
+        }
+    ),
+    "blogPost": frozenset(
+        {
+            "ISSN",
+            "blogTitle",
+            "websiteType",
+        }
+    ),
+    "interview": frozenset(
+        {
+            "interviewMedium",
+            "place",
+            "publisher",
+        }
+    ),
+    "dataset": frozenset(
+        {
+            "format",
+            "identifier",
+            "repository",
+            "repositoryLocation",
+            "type",
+            "versionNumber",
+        }
+    ),
 }
 
 _CREATOR_TYPES: frozenset[str] = frozenset(
     {
+        "artist",
+        "attorneyAgent",
         "author",
-        "editor",
-        "contributor",
-        "translator",
-        "seriesEditor",
         "bookAuthor",
+        "cartographer",
+        "castMember",
+        "chair",
+        "commenter",
+        "composer",
+        "contributor",
+        "cosponsor",
+        "counsel",
+        "creator",
+        "director",
+        "editor",
+        "executiveProducer",
+        "guest",
+        "host",
+        "interviewee",
+        "interviewer",
+        "inventor",
+        "narrator",
+        "organizer",
+        "originalCreator",
+        "performer",
+        "podcaster",
+        "presenter",
+        "producer",
+        "programmer",
+        "recipient",
         "reviewedAuthor",
+        "scriptwriter",
+        "seriesCreator",
+        "seriesEditor",
+        "sponsor",
+        "translator",
+        "wordsBy",
     }
 )
-
 
 class ManualItemValidationError(ValueError):
     """Nieprawidłowy payload ręcznej pozycji."""
 
 
+def primary_title_field(item_type: str) -> str:
+    return TITLE_FIELD_BY_TYPE.get(item_type, "title")
+
+
 def allowed_fields_for(item_type: str) -> frozenset[str]:
-    return _COMMON_FIELDS | _TYPE_FIELDS.get(item_type, frozenset())
+    fields = set(_COMMON_FIELDS) | set(_TYPE_FIELDS.get(item_type, frozenset()))
+    primary = primary_title_field(item_type)
+    if primary != "title":
+        fields.discard("title")
+        fields.add(primary)
+        # Alias: Gemini / formularz mogą wysłać title — mapujemy później.
+        fields.add("title")
+    return frozenset(fields)
 
 
 def _strip_empty(value: Any) -> Any:
@@ -200,6 +676,7 @@ def validate_and_normalize_item(
             f"{item_type}: {', '.join(sorted(unknown))}."
         )
 
+    primary = primary_title_field(item_type)
     item: dict[str, Any] = {"itemType": item_type}
     for key in allowed:
         if key == "creators":
@@ -210,10 +687,16 @@ def validate_and_normalize_item(
         if value in ("", None, [], {}):
             continue
         if not isinstance(value, (str, int, float, bool)):
-            # Pola skalarne Zotero — listy poza creators odrzucamy.
             if key != "creators":
                 raise ManualItemValidationError(f"Pole {key} musi być tekstem.")
         item[key] = str(value).strip() if isinstance(value, str) else value
+
+    # title → alias (caseName / nameOfAct / subject)
+    if primary != "title":
+        if primary not in item and item.get("title"):
+            item[primary] = item.pop("title")
+        elif "title" in item and primary in item:
+            item.pop("title", None)
 
     creators_raw = payload.get("creators")
     if creators_raw is not None:
@@ -227,9 +710,9 @@ def validate_and_normalize_item(
         if creators:
             item["creators"] = creators
 
-    title = str(item.get("title") or "").strip()
+    title = str(item.get(primary) or "").strip()
     if require_title and not title:
-        raise ManualItemValidationError("Wymagane pole: title.")
+        raise ManualItemValidationError(f"Wymagane pole: {primary}.")
 
     coll = str(collection_key or "").strip()
     if not coll:
@@ -268,8 +751,8 @@ def gemini_response_schema(item_type: str) -> dict:
         },
         **string_props,
     }
-    # Gemini 2.0 wymaga propertyOrdering przy structured output.
-    ordering = ["itemType", "title", "creators", "date", "url", "abstractNote"]
+    primary = primary_title_field(item_type)
+    ordering = ["itemType", primary, "creators", "date", "url", "abstractNote"]
     for key in sorted(properties.keys()):
         if key not in ordering:
             ordering.append(key)

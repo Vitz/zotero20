@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.3.3';
+const ADDON_VERSION = '2.3.4';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -20,6 +20,8 @@ const PROP_INLINE_FULL_REFERENCE = 'ZOTERO20_INLINE_FULL_REFERENCE';
 const PROP_INLINE_DOI_MODE_LEGACY = 'ZOTERO20_INLINE_DOI_MODE';
 const PROP_SKIP_END_BIBLIOGRAPHY = 'ZOTERO20_SKIP_END_BIBLIOGRAPHY';
 const PROP_DEBUG = 'ZOTERO20_DEBUG';
+/** Klucz do API zotero.keyweb.pl — zapisywany z panelu Docs (Ustawienia). */
+const PROP_ZOTERO20_API_KEY = 'ZOTERO20_API_KEY';
 const PROP_GEMINI_API_KEY = 'ZOTERO20_GEMINI_API_KEY';
 const PROP_DEEPL_API_KEY = 'ZOTERO20_DEEPL_API_KEY';
 const PROP_DEEPL_PLAN = 'ZOTERO20_DEEPL_PLAN';
@@ -317,7 +319,7 @@ function importManual(itemPayload, options) {
  * Gemini: tekst → draft pól (bez zapisu do Zotero).
  * Preferencja: bezpośredni UrlFetch do generativelanguage.googleapis.com
  * (omija Django/Cloudflare — CF Free ~100s i UrlFetch ~60s).
- * Fallback: POST /import/describe gdy brak klucza w Script Properties
+ * Fallback: POST /import/describe gdy brak klucza Gemini w panelu
  * albo gdy bezpośrednie wywołanie padnie sieciowo.
  * Zwraca { draft, warnings, model }.
  */
@@ -352,14 +354,14 @@ function describeManualItem(itemType, text) {
 
 /**
  * Bezpośrednie wywołanie Gemini REST (Apps Script → Google).
- * Klucz z Script Properties — nigdy nie loguj wartości.
+ * Klucz Gemini z panelu Docs — nigdy nie loguj wartości.
  */
 function describeWithGemini_(itemType, text, apiKey) {
   itemType = String(itemType || '').trim();
   text = String(text || '').trim();
   apiKey = String(apiKey || '').trim();
   if (!apiKey) {
-    throw new Error('Brak klucza Gemini — ustaw w Ustawieniach');
+    throw new Error('Brak klucza Gemini — wklej go w Ustawieniach panelu Docs');
   }
   if (!text) {
     throw new Error('Wymagane pole: text.');
@@ -593,19 +595,44 @@ function normalizeGeminiDraft_(itemType, draftRaw) {
   return { draft: draft, warnings: warnings };
 }
 
-/** Klucz Gemini z Script Properties (pusty string jeśli brak). Do UrlFetch Gemini i fallbacku serwera. */
+/** Klucz API zotero.keyweb.pl — ustawiany w panelu Docs (Ustawienia). */
+function getZotero20ApiKey() {
+  var key = PropertiesService.getScriptProperties().getProperty(PROP_ZOTERO20_API_KEY);
+  return key ? String(key).trim() : '';
+}
+
+function hasZotero20ApiKey() {
+  return !!getZotero20ApiKey();
+}
+
+/**
+ * Zapisuje klucz serwera Zotero20 z panelu Docs.
+ * Pusty string usuwa klucz. Nie wymaga edytora Apps Script.
+ */
+function saveZotero20ApiKey(key) {
+  key = String(key || '').trim();
+  var props = PropertiesService.getScriptProperties();
+  if (!key) {
+    props.deleteProperty(PROP_ZOTERO20_API_KEY);
+    return { configured: false };
+  }
+  props.setProperty(PROP_ZOTERO20_API_KEY, key);
+  return { configured: true };
+}
+
+/** Klucz Gemini — ustawiany w panelu Docs (Ustawienia). */
 function getGeminiApiKey() {
   var key = PropertiesService.getScriptProperties().getProperty(PROP_GEMINI_API_KEY);
   return key ? String(key).trim() : '';
 }
 
-/** Czy Script Properties ma klucz Gemini (bez ujawniania wartości do HTML). */
+/** Czy jest zapisany klucz Gemini (bez ujawniania wartości do HTML). */
 function hasGeminiApiKey() {
   return !!getGeminiApiKey();
 }
 
 /**
- * Zapisuje klucz Gemini w Script Properties (per projekt Apps Script).
+ * Zapisuje klucz Gemini z panelu Docs.
  * Pusty string usuwa klucz. Nigdy nie commituj klucza do repo.
  */
 function saveGeminiApiKey(key) {
@@ -620,7 +647,7 @@ function saveGeminiApiKey(key) {
 }
 
 /**
- * Czy Gemini jest dostępne: klucz w Script Properties (Ustawienia)
+ * Czy Gemini jest dostępne: klucz z Ustawień panelu
  * albo opcjonalny GEMINI_API_KEY na serwerze (health?verbose=1).
  */
 function getGeminiConfigured() {
@@ -734,7 +761,7 @@ function pingApiHealth() {
  */
 function pingZoteroHealth() {
   var checkedAt = new Date().toISOString();
-  var apiKey = PropertiesService.getScriptProperties().getProperty('ZOTERO20_API_KEY');
+  var apiKey = getZotero20ApiKey();
   if (!apiKey) {
     return {
       ok: false,
@@ -742,7 +769,7 @@ function pingZoteroHealth() {
       zotero: null,
       http: 0,
       checkedAt: checkedAt,
-      error: 'Brak ZOTERO20_API_KEY w Script Properties.',
+      error: 'Brak klucza API — wklej go w Ustawieniach panelu Docs.',
     };
   }
   try {
@@ -2564,7 +2591,7 @@ function extractItemKey_(result) {
 }
 
 // ---------------------------------------------------------------------------
-// DeepL — wywołania bezpośrednie z Apps Script (UrlFetch), klucz w Script Properties
+// DeepL — wywołania bezpośrednie z Apps Script (UrlFetch), klucz z panelu Docs
 // ---------------------------------------------------------------------------
 
 function getDeepLApiKey() {
@@ -3606,11 +3633,12 @@ function apiDelete(path) {
 }
 
 function apiHeaders_() {
-  const props = PropertiesService.getScriptProperties();
-  const headers = { 'Accept': 'application/json' };
-  const apiKey = props.getProperty('ZOTERO20_API_KEY');
+  const headers = { Accept: 'application/json' };
+  const apiKey = getZotero20ApiKey();
   if (!apiKey) {
-    throw new Error('Ustaw ZOTERO20_API_KEY w Script Properties.');
+    throw new Error(
+      'Brak klucza API serwera — otwórz zakładkę Ustawienia w panelu i wklej klucz Zotero20.'
+    );
   }
   headers['X-API-Key'] = apiKey;
   return headers;

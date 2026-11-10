@@ -351,7 +351,7 @@
     <p class="hint" style="font-size:11px;color:#555;margin:0 0 8px;">
       Zaznacz tekst w dokumencie, ustaw łańcuch języków (A → B → C…), potem
       <strong>Tłumacz zaznaczony tekst</strong>. Każdy krok bierze wynik poprzedniego.
-      Klucz zostaje w Script Properties (nie w repo). Wywołanie idzie bezpośrednio do DeepL.
+      Klucz DeepL wklejasz poniżej w tym panelu (nie w edytorze Apps Script). Wywołanie idzie bezpośrednio do DeepL.
     </p>
 
     <label for="deepl-api-key">Klucz API DeepL</label>
@@ -670,14 +670,26 @@
       albo <strong>Zmień styl</strong> w zakładce Cytowania.
     </p>
 
-    <h3 style="margin:16px 0 6px;font-size:13px;">Klucz Gemini (AI Studio)</h3>
+    <h3 style="margin:16px 0 6px;font-size:13px;">Klucze API (w tym oknie Docs)</h3>
     <p class="hint" style="font-size:11px;color:#555;margin:0 0 8px;">
-      Wklej klucz z
-      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>.
-      Zapis trafia do <strong>Script Properties</strong> tego projektu Apps Script
-      (nie do repozytorium i nie wymaga <code>GEMINI_API_KEY</code> na VPS).
+      Wszystkie klucze wklejasz tutaj w panelu — <strong>bez</strong> edytora Apps Script
+      i bez konfiguracji „od zaplecza”. Zostają lokalnie w projekcie tego dokumentu.
     </p>
-    <label for="gemini-api-key">Klucz API Gemini</label>
+
+    <label for="zotero20-api-key">Klucz API Zotero20 (serwer)</label>
+    <input id="zotero20-api-key" type="password" autocomplete="off" spellcheck="false"
+      placeholder="Ten sam co ZOTERO20_API_KEY na serwerze">
+    <button id="btn-save-zotero20-key" type="button" onclick="saveZotero20ApiKeyFromSettings()">
+      Zapisz klucz Zotero20
+    </button>
+    <p id="zotero20-key-status" class="hint" style="font-size:11px;color:#555;margin-top:6px;"></p>
+
+    <label for="gemini-api-key" style="margin-top:12px;">Klucz API Gemini (AI Studio)</label>
+    <p class="hint" style="font-size:11px;color:#555;margin:0 0 6px;">
+      Z
+      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>
+      — bezpośrednie wywołanie z Docs, bez VPS.
+    </p>
     <input id="gemini-api-key" type="password" autocomplete="off" spellcheck="false"
       placeholder="Wklej klucz albo zostaw puste, by usunąć">
     <button id="btn-save-gemini-key" type="button" onclick="saveGeminiApiKeyFromSettings()">
@@ -738,7 +750,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.3.3';
+    var SIDEBAR_VERSION = '2.3.4';
 
     // UrlFetchApp: health co 5 min (wcześniej 3 s paliło dzienny limit).
     var HEALTH_POLL_MS = 300000;
@@ -834,7 +846,7 @@
           if (z.user_id) lines.push('user_id: ' + z.user_id);
         }
       } else if (state === 'no_key') {
-        lines[0] += 'brak klucza API';
+        lines[0] += 'brak klucza — Ustawienia panelu';
       } else {
         lines[0] += 'błąd';
         if (result && result.error) lines.push(String(result.error));
@@ -936,6 +948,7 @@
       }
       if (name === 'settings') {
         loadStatus();
+        loadZotero20KeyStatus();
         loadGeminiKeyStatus();
       }
       if (name === 'deepl') {
@@ -2745,6 +2758,58 @@
         .getGeminiConfigured();
     }
 
+    function loadZotero20KeyStatus() {
+      var statusEl = document.getElementById('zotero20-key-status');
+      if (!statusEl) return;
+      google.script.run
+        .withSuccessHandler(function (configured) {
+          statusEl.textContent = configured
+            ? 'Klucz Zotero20 zapisany (ten panel Docs).'
+            : 'Brak klucza — wklej powyżej i kliknij Zapisz.';
+          if (configured) {
+            var input = document.getElementById('zotero20-api-key');
+            if (input && !input.value) {
+              input.placeholder = '•••••••• (zapisany — wklej nowy, by zmienić)';
+            }
+          }
+        })
+        .withFailureHandler(function () {
+          statusEl.textContent = 'Nie udało się odczytać statusu klucza Zotero20.';
+        })
+        .hasZotero20ApiKey();
+    }
+
+    function saveZotero20ApiKeyFromSettings() {
+      var input = document.getElementById('zotero20-api-key');
+      var key = (input && input.value) || '';
+      var statusEl = document.getElementById('zotero20-key-status');
+      setStatus('Zapisuję klucz Zotero20…');
+      google.script.run
+        .withSuccessHandler(function (r) {
+          var configured = !!(r && r.configured);
+          if (input) {
+            input.value = '';
+            input.placeholder = configured
+              ? '•••••••• (zapisany — wklej nowy, by zmienić)'
+              : 'Ten sam co ZOTERO20_API_KEY na serwerze';
+          }
+          if (statusEl) {
+            statusEl.textContent = configured
+              ? 'Klucz Zotero20 zapisany (ten panel Docs).'
+              : 'Klucz Zotero20 usunięty.';
+          }
+          setStatus(
+            configured ? 'Zapisano klucz Zotero20.' : 'Usunięto klucz Zotero20.',
+            false
+          );
+          pollZoteroHealth();
+        })
+        .withFailureHandler(function (e) {
+          setStatus(formatScriptError(e), true);
+        })
+        .saveZotero20ApiKey(key);
+    }
+
     function loadGeminiKeyStatus() {
       var statusEl = document.getElementById('gemini-key-status');
       if (!statusEl) return;
@@ -2755,8 +2820,8 @@
             inneGeminiConfigured = true;
           }
           statusEl.textContent = configured
-            ? 'Klucz zapisany w Script Properties tego projektu.'
-            : 'Brak zapisanego klucza — ustaw w Ustawieniach (albo serwer ma własny GEMINI_API_KEY).';
+            ? 'Klucz Gemini zapisany (ten panel Docs).'
+            : 'Brak klucza — wklej powyżej (albo serwer ma własny GEMINI_API_KEY).';
           if (configured) {
             var input = document.getElementById('gemini-api-key');
             if (input && !input.value) {
@@ -2787,13 +2852,11 @@
           }
           if (statusEl) {
             statusEl.textContent = configured
-              ? 'Klucz zapisany w Script Properties tego projektu.'
-              : 'Klucz usunięty z Script Properties.';
+              ? 'Klucz Gemini zapisany (ten panel Docs).'
+              : 'Klucz Gemini usunięty.';
           }
           setStatus(
-            configured
-              ? 'Zapisano klucz Gemini (Script Properties).'
-              : 'Usunięto klucz Gemini.',
+            configured ? 'Zapisano klucz Gemini.' : 'Usunięto klucz Gemini.',
             false
           );
           refreshInneGeminiAvailability();
@@ -2858,7 +2921,7 @@
             }
             var statusEl = document.getElementById('gemini-key-status');
             if (statusEl && inneGeminiConfigured) {
-              statusEl.textContent = 'Klucz zapisany w Script Properties tego projektu.';
+              statusEl.textContent = 'Klucz Gemini zapisany (ten panel Docs).';
             }
             refreshInneGeminiAvailability();
             runDescribe();
@@ -3714,6 +3777,7 @@
       loadCitationSummary();
       loadStudyOverview();
       loadDebugMode();
+      loadZotero20KeyStatus();
       loadGeminiKeyStatus();
       setStatus('Wybierz kolekcję tego dokumentu w zakładce Ustawienia.');
     }

@@ -1,7 +1,9 @@
 # Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
-Wersja plików Apps Script: **2.3.3** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+Wersja plików Apps Script: **2.3.4** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+
+**Klucze API** (Zotero20 / Gemini / DeepL) wklejasz w panelu Docs — nie w edytorze Apps Script.
 
 Ustawienia → **Wygląd cytowań w tekście**: checkboxy „pełne referencje w miejscu cytowania” oraz „Bez bibliografii na końcu”.
 
@@ -12,7 +14,7 @@ Zakładka **DeepL**: klucz API (Free/Pro), łańcuch języków A→B→C…, opc
 ## Co robi panel
 
 **Import** — dodaje pozycje do biblioteki Zotero na serwerze (DOI / ORCID / ręczne „Inne” → kolekcja).
-Opcjonalnie Gemini (klucz w Ustawieniach panelu / Script Properties) uzupełnia pola z wklejonego tekstu.
+Opcjonalnie Gemini (klucz w Ustawieniach panelu) uzupełnia pola z wklejonego tekstu.
 
 **Śledzone cytowania w tekście** — wstawia cytowanie w miejscu kursora (albo zamiast `[*]`) i oznacza je
 ukrytą kotwicą-linkiem `https://zotero.keyweb.pl/cite/<ITEMKEY>?c=<id>&t=<tytuł>`.
@@ -67,15 +69,17 @@ Apps Script nie ma API do pól dokumentu — kotwica-link to najbliższy możliw
 Jeśli skopiujesz tylko jeden plik, panel wyświetli czerwone ostrzeżenie o niezgodnych wersjach —
 to zabezpieczenie przed „naprawami, które nie działają, bo w Docs jest stary kod”.
 
-## Script Properties
+## Klucze API (panel Docs, nie edytor Apps Script)
 
-| Klucz | Wartość |
-|-------|---------|
-| `ZOTERO20_API_KEY` | klucz z `server/.env` (wymagany) |
-| `ZOTERO20_GEMINI_API_KEY` | klucz Google AI Studio (opcjonalny; Ustawienia panelu) |
-| `ZOTERO20_DEBUG` | opcjonalnie `true` — tryb diagnostyczny |
+Wklejaj w sidebara (**Ustawienia** / **DeepL**) — zapis dzieje się automatycznie:
 
-Klucz Gemini zapisujesz w panelu: **Ustawienia → Klucz Gemini (AI Studio)**.
+| Pole w panelu | Właściwość | Wartość |
+|---------------|------------|---------|
+| Klucz API Zotero20 | `ZOTERO20_API_KEY` | ten sam co w `server/.env` |
+| Klucz Gemini | `ZOTERO20_GEMINI_API_KEY` | Google AI Studio |
+| Klucz DeepL | `ZOTERO20_DEEPL_API_KEY` | DeepL Free/Pro |
+| Tryb diagnostyczny | `ZOTERO20_DEBUG` | checkbox w Ustawieniach |
+
 Od **2.2.3** panel woła Gemini **bezpośrednio** z Apps Script (`UrlFetch` →
 `generativelanguage.googleapis.com`) — omija Django i Cloudflare (od **2.2.4**
 domyślny model: `gemini-3.5-flash-lite`). Utworzenie pozycji nadal idzie przez
@@ -150,7 +154,7 @@ Panel pokazuje obie kropki statusu (API / Zotero) przy tytule i odświeża je co
 | „Brak placeholdera” | Tryb placeholderów, brak dopasowania w tekście | Wpisz `[*]`, `[DOI]`, `[10.xxxx/…]` lub `[DOI:10.xxxx/…]`, albo przełącz tryb na „w miejscu kursora” |
 | „Brak bibliografii w dokumencie” przy odświeżaniu | Sekcja została usunięta z dokumentu | Użyj **Wstaw bibliografię** |
 | Pusta lista kolekcji | Serwer bez `ZOTERO_WEB_API_KEY` albo pusta biblioteka Docker | Sprawdź `GET /api/v1/collections` (`"source"` = `"web"`), albo wpisz klucz kolekcji ręcznie |
-| Szara kropka „Zotero” | Brak `ZOTERO20_API_KEY` w Script Properties | Ustaw klucz jak w `.env` na serwerze |
+| Szara kropka „Zotero” | Brak klucza API w panelu | Ustawienia → wklej klucz jak w `.env` na serwerze |
 | Czerwona kropka „API” | Serwer / domena niedostępna | Sprawdź `curl …/api/v1/health` i deploy |
 | Czerwona kropka „Zotero” | Zotero Web/Local API nie odpowiada | Sprawdź `curl -H "X-API-Key: …" …/api/v1/health/zotero` |
 | „Nieprawidłowy klucz API” | Zły `ZOTERO20_API_KEY` | Ustaw ten sam klucz co w `.env` na serwerze |

@@ -55,7 +55,7 @@ class TestResolveLocale:
 
 class TestStyleLabel:
     def test_known_label(self):
-        assert style_label("apa") == "APA 7th edition"
+        assert style_label("apa") == "APA 7th"
 
     def test_unknown_returns_id(self):
         assert style_label("custom") == "custom"

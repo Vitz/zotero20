@@ -448,6 +448,62 @@
       Podgląd łańcucha (bez podmiany)
     </button>
 
+    <h3 style="margin:20px 0 6px;font-size:13px;">DeepL Write — poprawa tekstu</h3>
+    <p class="hint" style="font-size:11px;color:#555;margin:0 0 8px;">
+      Poprawia / przeredagowuje zaznaczenie <strong>w tym samym języku</strong>
+      (<code>/v2/write/rephrase</code> lub <code>/correct</code>).
+      Wymaga <strong>API Pro</strong>. DeepL Write <strong>nie wspiera PL</strong>
+      (en-US, de, fr…). Domyślnie wstawia jako
+      <strong>sugerowaną zmianę</strong> w Docs — zaakceptuj lub odrzuć w dokumencie.
+    </p>
+    <label for="deepl-write-mode">Tryb Write</label>
+    <select id="deepl-write-mode">
+      <option value="rephrase">Rephrase — popraw + przeredaguj</option>
+      <option value="correct">Correct — tylko ortografia/gramatyka</option>
+    </select>
+    <label for="deepl-write-lang">Język tekstu (Write)</label>
+    <select id="deepl-write-lang"></select>
+    <label for="deepl-write-style">Styl (tylko rephrase)</label>
+    <select id="deepl-write-style">
+      <option value="">Bez wymuszania stylu</option>
+      <option value="academic">academic</option>
+      <option value="business">business</option>
+      <option value="casual">casual</option>
+      <option value="simple">simple</option>
+      <option value="prefer_academic">prefer_academic</option>
+      <option value="prefer_business">prefer_business</option>
+      <option value="prefer_casual">prefer_casual</option>
+      <option value="prefer_simple">prefer_simple</option>
+    </select>
+    <label for="deepl-write-tone">Ton (tylko rephrase; wyklucza styl)</label>
+    <select id="deepl-write-tone">
+      <option value="">Bez wymuszania tonu</option>
+      <option value="confident">confident</option>
+      <option value="diplomatic">diplomatic</option>
+      <option value="enthusiastic">enthusiastic</option>
+      <option value="friendly">friendly</option>
+      <option value="prefer_confident">prefer_confident</option>
+      <option value="prefer_diplomatic">prefer_diplomatic</option>
+      <option value="prefer_enthusiastic">prefer_enthusiastic</option>
+      <option value="prefer_friendly">prefer_friendly</option>
+    </select>
+    <label for="deepl-write-apply">Jak zastosować wynik</label>
+    <select id="deepl-write-apply">
+      <option value="suggest">Sugerowana zmiana (zaakceptuj w Docs)</option>
+      <option value="replace">Zamień od razu</option>
+      <option value="preview">Tylko podgląd w panelu</option>
+    </select>
+    <button type="button" onclick="saveDeepLWriteOptionsFromUi()" style="margin-top:8px;">
+      Zapisz opcje Write
+    </button>
+    <button id="btn-deepl-write" type="button" onclick="doDeepLWriteSelection()"
+      style="margin-top:10px;font-weight:600;">
+      DeepL Write na zaznaczeniu
+    </button>
+    <button type="button" onclick="doDeepLWritePreview()" style="margin-top:6px;">
+      Podgląd Write (bez zmian w dokumencie)
+    </button>
+
     <pre id="deepl-result" style="margin:10px 0 0;padding:8px;background:#f5f5f5;border-radius:4px;font-size:11px;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;"></pre>
   </div>
 
@@ -682,7 +738,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.3.2';
+    var SIDEBAR_VERSION = '2.3.3';
 
     // UrlFetchApp: health co 5 min (wcześniej 3 s paliło dzienny limit).
     var HEALTH_POLL_MS = 300000;
@@ -3086,6 +3142,8 @@
             ? 'Klucz DeepL zapisany (plan: ' + (s.plan || '?') + ').'
             : 'Brak klucza — wklej z https://www.deepl.com/pro-api';
           applyDeepLOptionsToForm(s.options || {});
+          fillDeepLWriteLangSelect(s.write_languages || []);
+          applyDeepLWriteOptionsToForm(s.write || {});
           renderDeepLChain();
           loadDeepLLanguages(!!s.configured);
           if (s.configured) {
@@ -3097,6 +3155,58 @@
           setStatus(formatScriptError(e), true);
         })
         .getDeepLSettings();
+    }
+
+    function fillDeepLWriteLangSelect(langs) {
+      var sel = document.getElementById('deepl-write-lang');
+      if (!sel) return;
+      var current = sel.value;
+      sel.innerHTML = '';
+      (langs || []).forEach(function (l) {
+        var opt = document.createElement('option');
+        opt.value = l.language;
+        opt.textContent = (l.name || l.language) + ' (' + l.language + ')';
+        sel.appendChild(opt);
+      });
+      if (!sel.options.length) {
+        var fallback = document.createElement('option');
+        fallback.value = 'en-US';
+        fallback.textContent = 'English (American) (en-US)';
+        sel.appendChild(fallback);
+      }
+      if (current) sel.value = current;
+    }
+
+    function applyDeepLWriteOptionsToForm(opts) {
+      opts = opts || {};
+      var mode = document.getElementById('deepl-write-mode');
+      if (mode) mode.value = opts.mode === 'correct' ? 'correct' : 'rephrase';
+      var lang = document.getElementById('deepl-write-lang');
+      if (lang && opts.target_lang) lang.value = opts.target_lang;
+      var style = document.getElementById('deepl-write-style');
+      if (style) style.value = opts.writing_style || '';
+      var tone = document.getElementById('deepl-write-tone');
+      if (tone) tone.value = opts.tone || '';
+      var apply = document.getElementById('deepl-write-apply');
+      if (apply) {
+        apply.value =
+          opts.apply_mode === 'replace' || opts.apply_mode === 'preview'
+            ? opts.apply_mode
+            : 'suggest';
+      }
+    }
+
+    function collectDeepLWriteOptionsFromForm() {
+      var style = document.getElementById('deepl-write-style').value || '';
+      var tone = document.getElementById('deepl-write-tone').value || '';
+      if (style && tone) tone = '';
+      return {
+        mode: document.getElementById('deepl-write-mode').value || 'rephrase',
+        target_lang: document.getElementById('deepl-write-lang').value || 'en-US',
+        writing_style: style,
+        tone: tone,
+        apply_mode: document.getElementById('deepl-write-apply').value || 'suggest',
+      };
     }
 
     function applyDeepLOptionsToForm(opts) {
@@ -3483,6 +3593,111 @@
           setStatus(formatScriptError(e), true);
         })
         .saveDeepLChain(deeplState.chain);
+    }
+
+    function saveDeepLWriteOptionsFromUi() {
+      var write = collectDeepLWriteOptionsFromForm();
+      setStatus('Zapisuję opcje DeepL Write…');
+      google.script.run
+        .withSuccessHandler(function () {
+          setStatus('Zapisano opcje DeepL Write.', false);
+        })
+        .withFailureHandler(function (e) {
+          setStatus(formatScriptError(e), true);
+        })
+        .saveDeepLWriteOptions(write);
+    }
+
+    function formatDeepLWriteResult(r) {
+      r = r || {};
+      var lines = [];
+      lines.push('Tryb: ' + (r.mode || '?'));
+      lines.push('Język: ' + (r.target_language || r.detected_source_language || '?'));
+      if (r.writing_style) lines.push('Styl: ' + r.writing_style);
+      if (r.tone) lines.push('Ton: ' + r.tone);
+      lines.push(
+        'Zastosowanie: ' +
+          (r.apply_mode || '?') +
+          (r.applied ? ' (wstawiono)' : r.preview_only ? ' (podgląd)' : '')
+      );
+      if (r.unchanged) lines.push('(bez zmian — tekst już był poprawny)');
+      lines.push('');
+      lines.push('— Oryginał —');
+      lines.push(r.original || '');
+      lines.push('');
+      lines.push('— Write —');
+      lines.push(r.final_text || '');
+      return lines.join('\n');
+    }
+
+    function doDeepLWriteSelection() {
+      var write = collectDeepLWriteOptionsFromForm();
+      var out = document.getElementById('deepl-result');
+      var btn = document.getElementById('btn-deepl-write');
+      out.textContent = '';
+      setStatus(
+        write.apply_mode === 'suggest'
+          ? 'DeepL Write → sugerowana zmiana…'
+          : write.apply_mode === 'preview'
+            ? 'DeepL Write (podgląd)…'
+            : 'DeepL Write → zamiana tekstu…'
+      );
+      if (btn) btn.disabled = true;
+      google.script.run
+        .withSuccessHandler(function () {
+          google.script.run
+            .withSuccessHandler(function (r) {
+              if (btn) btn.disabled = false;
+              out.textContent = formatDeepLWriteResult(r);
+              if (r && r.apply_mode === 'suggest' && r.applied) {
+                setStatus(
+                  'Wstawiono sugerowaną zmianę — zaakceptuj lub odrzuć w Google Docs.',
+                  false
+                );
+              } else if (r && r.applied) {
+                setStatus('Zamieniono zaznaczenie wynikiem DeepL Write.', false);
+              } else if (r && r.unchanged) {
+                setStatus('DeepL Write: tekst bez zmian.', false);
+              } else {
+                setStatus('DeepL Write gotowe (podgląd).', false);
+              }
+              refreshDeepLUsage();
+            })
+            .withFailureHandler(function (e) {
+              if (btn) btn.disabled = false;
+              setStatus(formatScriptError(e), true);
+            })
+            .improveSelectedTextWithDeepL({ write: write });
+        })
+        .withFailureHandler(function (e) {
+          if (btn) btn.disabled = false;
+          setStatus(formatScriptError(e), true);
+        })
+        .saveDeepLWriteOptions(write);
+    }
+
+    function doDeepLWritePreview() {
+      var write = collectDeepLWriteOptionsFromForm();
+      write.apply_mode = 'preview';
+      var out = document.getElementById('deepl-result');
+      out.textContent = '';
+      setStatus('Podgląd DeepL Write…');
+      google.script.run
+        .withSuccessHandler(function () {
+          google.script.run
+            .withSuccessHandler(function (r) {
+              out.textContent = formatDeepLWriteResult(r);
+              setStatus('Podgląd Write gotowy (dokument bez zmian).', false);
+            })
+            .withFailureHandler(function (e) {
+              setStatus(formatScriptError(e), true);
+            })
+            .previewSelectedTextWithDeepLWrite({ write: write });
+        })
+        .withFailureHandler(function (e) {
+          setStatus(formatScriptError(e), true);
+        })
+        .saveDeepLWriteOptions(write);
     }
 
     function boot() {

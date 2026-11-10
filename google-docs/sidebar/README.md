@@ -1,9 +1,11 @@
 # Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
-Wersja plików Apps Script: **2.3.2** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+Wersja plików Apps Script: **2.3.3** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
 
 Ustawienia → **Wygląd cytowań w tekście**: checkboxy „pełne referencje w miejscu cytowania” oraz „Bez bibliografii na końcu”.
+
+Zakładka **DeepL** → **DeepL Write**: rephrase/correct (API Pro), domyślnie jako **sugerowana zmiana** w Docs (do akceptacji). Write nie wspiera PL.
 
 Zakładka **DeepL**: klucz API (Free/Pro), łańcuch języków A→B→C…, opcje (formalność, tagi, glossary, model), przycisk **Tłumacz zaznaczony tekst** (UrlFetch bezpośrednio do DeepL, tylko po kliknięciu).
 

@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.3.2';
+const ADDON_VERSION = '2.3.3';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -25,10 +25,26 @@ const PROP_DEEPL_API_KEY = 'ZOTERO20_DEEPL_API_KEY';
 const PROP_DEEPL_PLAN = 'ZOTERO20_DEEPL_PLAN';
 const PROP_DEEPL_CHAIN = 'ZOTERO20_DEEPL_CHAIN';
 const PROP_DEEPL_OPTIONS = 'ZOTERO20_DEEPL_OPTIONS';
+const PROP_DEEPL_WRITE_OPTIONS = 'ZOTERO20_DEEPL_WRITE_OPTIONS';
 const DEEPL_FREE_BASE = 'https://api-free.deepl.com';
 const DEEPL_PRO_BASE = 'https://api.deepl.com';
 const DEEPL_MAX_TEXT_LENGTH = 50000;
 const DEEPL_MAX_CHAIN_STEPS = 8;
+const DEEPL_WRITE_MAX_BYTES = 10000;
+/** Języki DeepL Write (API nie wspiera PL). */
+const DEEPL_WRITE_LANGS_ = [
+  { language: 'de', name: 'German' },
+  { language: 'en-GB', name: 'English (British)' },
+  { language: 'en-US', name: 'English (American)' },
+  { language: 'es', name: 'Spanish' },
+  { language: 'fr', name: 'French' },
+  { language: 'it', name: 'Italian' },
+  { language: 'ja', name: 'Japanese' },
+  { language: 'ko', name: 'Korean' },
+  { language: 'pt-BR', name: 'Portuguese (Brazilian)' },
+  { language: 'pt-PT', name: 'Portuguese (European)' },
+  { language: 'zh', name: 'Chinese (simplified)' },
+];
 // Gemini REST — wywołanie z Apps Script (UrlFetch), bez Django/Cloudflare.
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const GEMINI_DEFAULT_MODEL = 'gemini-3.5-flash-lite';
@@ -2679,12 +2695,74 @@ function saveDeepLOptions(options) {
   return current;
 }
 
+function getDeepLWriteOptions() {
+  var defaults = {
+    mode: 'rephrase', // rephrase | correct
+    target_lang: 'en-US',
+    writing_style: '',
+    tone: '',
+    apply_mode: 'suggest', // suggest | replace | preview
+  };
+  var raw = PropertiesService.getDocumentProperties().getProperty(PROP_DEEPL_WRITE_OPTIONS);
+  if (!raw) {
+    return defaults;
+  }
+  try {
+    var parsed = JSON.parse(raw) || {};
+    Object.keys(defaults).forEach(function (k) {
+      if (parsed[k] !== undefined && parsed[k] !== null && parsed[k] !== '') {
+        defaults[k] = parsed[k];
+      } else if (parsed[k] === '') {
+        defaults[k] = '';
+      }
+    });
+  } catch (ignore) {}
+  if (defaults.mode !== 'correct') {
+    defaults.mode = 'rephrase';
+  }
+  if (defaults.apply_mode !== 'replace' && defaults.apply_mode !== 'preview') {
+    defaults.apply_mode = 'suggest';
+  }
+  return defaults;
+}
+
+function saveDeepLWriteOptions(options) {
+  options = options || {};
+  var current = getDeepLWriteOptions();
+  Object.keys(current).forEach(function (k) {
+    if (options[k] !== undefined) {
+      current[k] = options[k];
+    }
+  });
+  if (current.mode !== 'correct') {
+    current.mode = 'rephrase';
+  }
+  if (current.apply_mode !== 'replace' && current.apply_mode !== 'preview') {
+    current.apply_mode = 'suggest';
+  }
+  // styl i ton są wzajemnie wykluczające (wymóg DeepL).
+  if (current.writing_style && current.tone) {
+    current.tone = '';
+  }
+  PropertiesService.getDocumentProperties().setProperty(
+    PROP_DEEPL_WRITE_OPTIONS,
+    JSON.stringify(current)
+  );
+  return current;
+}
+
+function getDeepLWriteLanguages() {
+  return { languages: DEEPL_WRITE_LANGS_.slice(), from_api: false };
+}
+
 function getDeepLSettings() {
   return {
     configured: hasDeepLApiKey(),
     plan: getDeepLPlan(),
     chain: getDeepLChain(),
     options: getDeepLOptions(),
+    write: getDeepLWriteOptions(),
+    write_languages: DEEPL_WRITE_LANGS_.slice(),
   };
 }
 
@@ -2793,7 +2871,8 @@ function translateSelectedTextWithDeepL(options) {
   }
 
   var result = translateTextChainDeepL_(selected.text, chain, opts);
-  replaceSelectedPlainText_(selected, result.final_text);
+  var applyMode = options.apply_mode || 'replace';
+  var applied = applyTextToSelection_(selected, result.final_text, applyMode);
 
   return {
     original: selected.text,
@@ -2801,6 +2880,8 @@ function translateSelectedTextWithDeepL(options) {
     steps: result.steps,
     chain: chain,
     billed_characters: result.billed_characters,
+    apply_mode: applied.apply_mode,
+    applied: applied.applied,
   };
 }
 
@@ -2994,6 +3075,425 @@ function replaceSelectedPlainText_(selected, newText) {
     first.textElement.deleteText(first.start, first.end);
   }
   first.textElement.insertText(first.start, newText);
+}
+
+/**
+ * apply_mode: replace | suggest | preview
+ * suggest = natywna „Sugerowana zmiana” w Google Docs (do akceptacji/odrzucenia).
+ */
+function applyTextToSelection_(selected, newText, applyMode) {
+  applyMode = applyMode === 'suggest' || applyMode === 'preview' ? applyMode : 'replace';
+  newText = String(newText || '');
+  if (applyMode === 'preview') {
+    return { apply_mode: 'preview', applied: false };
+  }
+  if (selected.text === newText) {
+    return { apply_mode: applyMode, applied: false, unchanged: true };
+  }
+  if (applyMode === 'suggest') {
+    suggestReplaceSelectedText_(selected, newText);
+    return { apply_mode: 'suggest', applied: true };
+  }
+  replaceSelectedPlainText_(selected, newText);
+  return { apply_mode: 'replace', applied: true };
+}
+
+/**
+ * DeepL Write: poprawa / przeredagowanie zaznaczenia (w obrębie jednego języka).
+ * Domyślnie wstawia jako sugerowaną zmianę Docs (do potwierdzenia).
+ */
+function improveSelectedTextWithDeepL(options) {
+  options = options || {};
+  if (options.write) {
+    saveDeepLWriteOptions(options.write);
+  }
+  var writeOpts = getDeepLWriteOptions();
+  if (options.apply_mode) {
+    writeOpts.apply_mode = options.apply_mode;
+  }
+
+  var selected = getSelectedPlainText_();
+  if (selected.text.length > DEEPL_MAX_TEXT_LENGTH) {
+    throw new Error(
+      'Zaznaczenie jest za długie (' +
+        selected.text.length +
+        ' znaków). Limit: ' +
+        DEEPL_MAX_TEXT_LENGTH +
+        '.'
+    );
+  }
+  var byteLen = Utilities.newBlob(selected.text).getBytes().length;
+  if (byteLen > DEEPL_WRITE_MAX_BYTES) {
+    throw new Error(
+      'DeepL Write ma limit ~10 KiB na request (teraz ' + byteLen + ' B). Zaznacz krótszy fragment.'
+    );
+  }
+
+  var improved = deeplWriteImprove_(selected.text, writeOpts);
+  var applied = applyTextToSelection_(selected, improved.text, writeOpts.apply_mode);
+
+  return {
+    original: selected.text,
+    final_text: improved.text,
+    detected_source_language: improved.detected_source_language,
+    target_language: improved.target_language,
+    mode: writeOpts.mode,
+    writing_style: writeOpts.writing_style || '',
+    tone: writeOpts.tone || '',
+    apply_mode: applied.apply_mode,
+    applied: applied.applied,
+    unchanged: !!applied.unchanged,
+  };
+}
+
+function previewSelectedTextWithDeepLWrite(options) {
+  options = options || {};
+  if (options.write) {
+    saveDeepLWriteOptions(options.write);
+  }
+  var writeOpts = getDeepLWriteOptions();
+  writeOpts.apply_mode = 'preview';
+  var selected = getSelectedPlainText_();
+  var improved = deeplWriteImprove_(selected.text, writeOpts);
+  return {
+    original: selected.text,
+    final_text: improved.text,
+    detected_source_language: improved.detected_source_language,
+    target_language: improved.target_language,
+    mode: writeOpts.mode,
+    writing_style: writeOpts.writing_style || '',
+    tone: writeOpts.tone || '',
+    apply_mode: 'preview',
+    applied: false,
+    preview_only: true,
+  };
+}
+
+function deeplWriteImprove_(text, writeOpts) {
+  if (!hasDeepLApiKey()) {
+    throw new Error('Brak klucza DeepL — ustaw go w zakładce DeepL.');
+  }
+  if (getDeepLPlan() === 'free') {
+    throw new Error(
+      'DeepL Write wymaga planu API Pro (api.deepl.com). Free (:fx) obsługuje tylko tłumaczenie.'
+    );
+  }
+  writeOpts = writeOpts || getDeepLWriteOptions();
+  var target = String(writeOpts.target_lang || 'en-US').trim();
+  if (!target) {
+    throw new Error('Wybierz język DeepL Write (API nie wspiera PL).');
+  }
+  var supported = false;
+  for (var i = 0; i < DEEPL_WRITE_LANGS_.length; i++) {
+    if (DEEPL_WRITE_LANGS_[i].language.toLowerCase() === target.toLowerCase()) {
+      supported = true;
+      target = DEEPL_WRITE_LANGS_[i].language;
+      break;
+    }
+  }
+  if (!supported) {
+    throw new Error(
+      'DeepL Write nie wspiera języka „' +
+        target +
+        '” (brak PL). Wybierz np. en-US, de, fr…'
+    );
+  }
+
+  var mode = writeOpts.mode === 'correct' ? 'correct' : 'rephrase';
+  var path = mode === 'correct' ? '/v2/write/correct' : '/v2/write/rephrase';
+  var payload = {
+    text: [String(text)],
+    target_lang: target,
+  };
+  if (mode === 'rephrase') {
+    var style = String(writeOpts.writing_style || '').trim();
+    var tone = String(writeOpts.tone || '').trim();
+    if (style && tone) {
+      tone = '';
+    }
+    if (style && style !== 'default') {
+      payload.writing_style = style;
+    }
+    if (tone && tone !== 'default') {
+      payload.tone = tone;
+    }
+  }
+
+  var body = deeplFetch_(path, 'post', payload);
+  var item =
+    body && body.improvements && body.improvements[0] ? body.improvements[0] : null;
+  if (!item || item.text === undefined) {
+    throw new Error('DeepL Write nie zwrócił poprawionego tekstu.');
+  }
+  return {
+    text: String(item.text),
+    detected_source_language: String(item.detected_source_language || ''),
+    target_language: String(item.target_language || target),
+  };
+}
+
+/**
+ * Natywna sugerowana zmiana Docs: delete + insert z writeMode=SUGGEST.
+ * Wymaga scope documents + autoryzacji Docs API.
+ */
+function suggestReplaceSelectedText_(selected, newText) {
+  var range = resolveSelectionDocsRange_(selected);
+  var docId = DocumentApp.getActiveDocument().getId();
+  var requests = [
+    {
+      deleteContentRange: {
+        range: {
+          startIndex: range.startIndex,
+          endIndex: range.endIndex,
+        },
+      },
+    },
+    {
+      insertText: {
+        location: { index: range.startIndex },
+        text: String(newText || ''),
+      },
+    },
+  ];
+  if (range.tabId) {
+    requests[0].deleteContentRange.range.tabId = range.tabId;
+    requests[1].insertText.location.tabId = range.tabId;
+  }
+  docsApiBatchUpdate_(docId, requests, { writeMode: 'SUGGEST' });
+}
+
+function docsApiBatchUpdate_(docId, requests, writeControl) {
+  var url =
+    'https://docs.googleapis.com/v1/documents/' +
+    encodeURIComponent(docId) +
+    ':batchUpdate';
+  var payload = { requests: requests };
+  if (writeControl) {
+    payload.writeControl = writeControl;
+  }
+  var response = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    muteHttpExceptions: true,
+    headers: {
+      Authorization: 'Bearer ' + ScriptApp.getOAuthToken(),
+    },
+    payload: JSON.stringify(payload),
+  });
+  var code = response.getResponseCode();
+  var text = response.getContentText() || '';
+  var body = {};
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch (ignore) {
+    body = {};
+  }
+  if (code >= 400) {
+    var msg =
+      (body.error && body.error.message) ||
+      text.slice(0, 400) ||
+      'HTTP ' + code;
+    if (code === 403 || /insufficient|scope|permission/i.test(msg)) {
+      throw new Error(
+        'Brak uprawnień Docs API do sugestii. W Apps Script: wdróż ponownie projekt ' +
+          '(nowy scope documents), otwórz panel i zaakceptuj uprawnienia. Szczegóły: ' +
+          msg
+      );
+    }
+    throw new Error('Docs API batchUpdate błąd HTTP ' + code + ': ' + msg);
+  }
+  return body;
+}
+
+function docsApiGetDocument_(docId) {
+  var url =
+    'https://docs.googleapis.com/v1/documents/' +
+    encodeURIComponent(docId) +
+    '?suggestionsViewMode=SUGGESTIONS_INLINE';
+  var response = UrlFetchApp.fetch(url, {
+    method: 'get',
+    muteHttpExceptions: true,
+    headers: {
+      Authorization: 'Bearer ' + ScriptApp.getOAuthToken(),
+      Accept: 'application/json',
+    },
+  });
+  var code = response.getResponseCode();
+  var text = response.getContentText() || '';
+  var body = {};
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch (ignore) {
+    body = {};
+  }
+  if (code >= 400) {
+    var msg =
+      (body.error && body.error.message) ||
+      text.slice(0, 400) ||
+      'HTTP ' + code;
+    throw new Error('Docs API get błąd HTTP ' + code + ': ' + msg);
+  }
+  return body;
+}
+
+/**
+ * Mapuje zaznaczenie DocumentApp → indeksy Docs API (start włącznie, end wyłącznie).
+ */
+function resolveSelectionDocsRange_(selected) {
+  var needle = String(selected && selected.text || '');
+  if (!needle) {
+    throw new Error('Puste zaznaczenie — nie da się zbudować sugestii.');
+  }
+  var docId = DocumentApp.getActiveDocument().getId();
+  var docJson = docsApiGetDocument_(docId);
+  var segments = collectDocsTextSegments_(docJson);
+  var haystack = '';
+  var indexMap = []; // haystack offset → docs index
+  for (var s = 0; s < segments.length; s++) {
+    var seg = segments[s];
+    for (var c = 0; c < seg.text.length; c++) {
+      indexMap.push(seg.startIndex + c);
+      haystack += seg.text.charAt(c);
+    }
+  }
+
+  var matches = [];
+  var from = 0;
+  while (from <= haystack.length - needle.length) {
+    var at = haystack.indexOf(needle, from);
+    if (at < 0) {
+      break;
+    }
+    matches.push(at);
+    from = at + 1;
+  }
+  if (!matches.length) {
+    // Fallback: DocumentApp replace — nie jako sugestia.
+    throw new Error(
+      'Nie udało się zmapować zaznaczenia na indeksy Docs API (tekst mógł się zmienić). ' +
+        'Zaznacz ponownie krótszy, ciągły fragment w jednym akapicie.'
+    );
+  }
+  if (matches.length > 1) {
+    // Spróbuj zawęzić po kontekście pierwszego slice'a.
+    var preferred = pickBestSelectionMatch_(matches, haystack, needle, selected);
+    matches = [preferred];
+  }
+  var startOff = matches[0];
+  var endOff = startOff + needle.length; // exclusive in haystack
+  var startIndex = indexMap[startOff];
+  var endIndex =
+    endOff < indexMap.length
+      ? indexMap[endOff]
+      : indexMap[indexMap.length - 1] + 1;
+  if (!(startIndex >= 1) || !(endIndex > startIndex)) {
+    throw new Error('Niepoprawny zakres Docs API dla zaznaczenia.');
+  }
+  return {
+    startIndex: startIndex,
+    endIndex: endIndex,
+    tabId: segments[0] && segments[0].tabId ? segments[0].tabId : '',
+  };
+}
+
+function pickBestSelectionMatch_(matches, haystack, needle, selected) {
+  var slices = (selected && selected.slices) || [];
+  if (!slices.length) {
+    return matches[0];
+  }
+  var elText = '';
+  try {
+    elText = slices[0].textElement.getText() || '';
+  } catch (ignore) {}
+  var localStart = slices[0].start || 0;
+  var before = elText.substring(Math.max(0, localStart - 24), localStart);
+  var afterEnd = localStart + needle.length;
+  var after = elText.substring(afterEnd, Math.min(elText.length, afterEnd + 24));
+  for (var i = 0; i < matches.length; i++) {
+    var at = matches[i];
+    var okBefore =
+      !before ||
+      haystack.substring(Math.max(0, at - before.length), at) === before;
+    var okAfter =
+      !after ||
+      haystack.substring(at + needle.length, at + needle.length + after.length) ===
+        after;
+    if (okBefore && okAfter) {
+      return at;
+    }
+  }
+  return matches[0];
+}
+
+function collectDocsTextSegments_(docJson) {
+  var segments = [];
+  var body = docJson && docJson.body;
+  if (body && body.content) {
+    walkDocsStructuralElements_(body.content, segments, '');
+  }
+  // Dokumenty z kartami (tabs).
+  var tabs = docJson && docJson.tabs;
+  if (tabs && tabs.length) {
+    for (var t = 0; t < tabs.length; t++) {
+      var tab = tabs[t];
+      var tabId = tab.tabId || (tab.documentTab && tab.documentTab.tabId) || '';
+      var tabBody =
+        tab.documentTab && tab.documentTab.body
+          ? tab.documentTab.body
+          : tab.body;
+      if (tabBody && tabBody.content) {
+        walkDocsStructuralElements_(tabBody.content, segments, tabId);
+      }
+    }
+  }
+  return segments;
+}
+
+function walkDocsStructuralElements_(elements, segments, tabId) {
+  if (!elements || !elements.length) {
+    return;
+  }
+  for (var i = 0; i < elements.length; i++) {
+    var el = elements[i];
+    if (el.paragraph && el.paragraph.elements) {
+      walkDocsParagraphElements_(el.paragraph.elements, segments, tabId);
+    }
+    if (el.table && el.table.tableRows) {
+      for (var r = 0; r < el.table.tableRows.length; r++) {
+        var row = el.table.tableRows[r];
+        var cells = row.tableCells || [];
+        for (var c = 0; c < cells.length; c++) {
+          walkDocsStructuralElements_(cells[c].content || [], segments, tabId);
+        }
+      }
+    }
+    if (el.tableOfContents && el.tableOfContents.content) {
+      walkDocsStructuralElements_(el.tableOfContents.content, segments, tabId);
+    }
+  }
+}
+
+function walkDocsParagraphElements_(elements, segments, tabId) {
+  for (var i = 0; i < elements.length; i++) {
+    var el = elements[i];
+    if (!el.textRun || el.textRun.content == null) {
+      continue;
+    }
+    var content = String(el.textRun.content);
+    // Docs API: każdy akapit kończy się \n — DocumentApp.getText() też je ma w elemencie.
+    if (!content) {
+      continue;
+    }
+    var startIndex = el.startIndex;
+    if (startIndex === undefined || startIndex === null) {
+      continue;
+    }
+    segments.push({
+      text: content,
+      startIndex: startIndex,
+      tabId: tabId || '',
+    });
+  }
 }
 
 var DEEPL_SOURCE_FALLBACK_ = [

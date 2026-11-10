@@ -614,7 +614,7 @@ class TestImportManualEndpoint:
             "/api/v1/import/manual",
             data=json.dumps(
                 {
-                    "itemType": "podcast",
+                    "itemType": "notARealZoteroType",
                     "title": "X",
                     "collection_key": COLLECTION_KEY,
                 }

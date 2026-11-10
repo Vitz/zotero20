@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.3.4';
+const ADDON_VERSION = '2.3.5';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -59,42 +59,484 @@ const GEMINI_SYSTEM_PROMPT =
   'Nie zmieniaj itemType na inny niż podany. ' +
   'Nieznane wartości = pusty string. Autorów rozbij na firstName/lastName gdy to możliwe.';
 const MANUAL_ITEM_TYPE_FIELDS = {
-  preprint: ['repository', 'archiveID', 'archive', 'libraryCatalog', 'callNumber'],
   journalArticle: [
     'publicationTitle',
+    'publisher',
+    'place',
     'volume',
     'issue',
+    'section',
+    'partNumber',
+    'partTitle',
     'pages',
     'series',
     'seriesTitle',
     'seriesText',
     'journalAbbreviation',
+    'citationKey',
+    'PMID',
+    'PMCID',
     'ISSN',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  encyclopediaArticle: [
+    'encyclopediaTitle',
+    'series',
+    'seriesNumber',
+    'volume',
+    'numberOfVolumes',
+    'edition',
+    'publisher',
+    'place',
+    'pages',
+    'ISBN',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  newspaperArticle: [
+    'publicationTitle',
+    'publisher',
+    'place',
+    'volume',
+    'issue',
+    'edition',
+    'section',
+    'pages',
+    'ISSN',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  magazineArticle: [
+    'publicationTitle',
+    'publisher',
+    'place',
+    'volume',
+    'issue',
+    'pages',
+    'ISSN',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  radioBroadcast: [
+    'programTitle',
+    'episodeNumber',
+    'audioRecordingFormat',
+    'network',
+    'place',
+    'runningTime',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  document: [
+    'type',
+    'publisher',
+    'place',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  artwork: [
+    'artworkMedium',
+    'artworkSize',
+    'eventPlace',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  email: [
+    'subject',
+    'citationKey',
+  ],
+  film: [
+    'distributor',
+    'place',
+    'genre',
+    'videoRecordingFormat',
+    'runningTime',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  dictionaryEntry: [
+    'dictionaryTitle',
+    'series',
+    'seriesNumber',
+    'volume',
+    'numberOfVolumes',
+    'edition',
+    'publisher',
+    'place',
+    'pages',
+    'ISBN',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  instantMessage: [
+    'citationKey',
   ],
   book: [
+    'series',
+    'seriesNumber',
+    'volume',
+    'numberOfVolumes',
+    'edition',
+    'publisher',
+    'place',
+    'originalDate',
+    'originalPublisher',
+    'originalPlace',
+    'format',
+    'numPages',
+    'ISBN',
+    'citationKey',
+    'ISSN',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  letter: [
+    'letterType',
+    'eventPlace',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  map: [
+    'mapType',
+    'scale',
+    'seriesTitle',
+    'edition',
     'publisher',
     'place',
     'ISBN',
-    'numPages',
-    'edition',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  conferencePaper: [
+    'proceedingsTitle',
+    'conferenceName',
+    'publisher',
+    'place',
+    'eventPlace',
     'volume',
+    'issue',
+    'numberOfVolumes',
+    'pages',
     'series',
     'seriesNumber',
+    'ISBN',
+    'citationKey',
+    'ISSN',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  audioRecording: [
+    'audioRecordingFormat',
+    'seriesTitle',
+    'volume',
+    'numberOfVolumes',
+    'label',
+    'place',
+    'runningTime',
+    'ISBN',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  videoRecording: [
+    'videoRecordingFormat',
+    'seriesTitle',
+    'volume',
+    'numberOfVolumes',
+    'studio',
+    'place',
+    'runningTime',
+    'ISBN',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  standard: [
+    'organization',
+    'committee',
+    'type',
+    'number',
+    'versionNumber',
+    'edition',
+    'status',
+    'publisher',
+    'place',
+    'partNumber',
+    'partTitle',
+    'ISBN',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'numPages',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  computerProgram: [
+    'seriesTitle',
+    'versionNumber',
+    'system',
+    'company',
+    'place',
+    'programmingLanguage',
+    'citationKey',
+    'ISBN',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  patent: [
+    'place',
+    'country',
+    'assignee',
+    'issuingAuthority',
+    'patentNumber',
+    'filingDate',
+    'pages',
+    'applicationNumber',
+    'priorityNumbers',
+    'issueDate',
+    'priorityDate',
+    'references',
+    'legalStatus',
+    'citationKey',
+  ],
+  podcast: [
+    'seriesTitle',
+    'episodeNumber',
+    'audioFileType',
+    'publisher',
+    'place',
+    'runningTime',
+    'citationKey',
+  ],
+  thesis: [
+    'thesisType',
+    'university',
+    'place',
+    'series',
+    'seriesNumber',
+    'numPages',
+    'ISBN',
+    'citationKey',
+    'ISSN',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  preprint: [
+    'genre',
+    'repository',
+    'archiveID',
+    'place',
+    'series',
+    'seriesNumber',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  presentation: [
+    'presentationType',
+    'meetingName',
+    'place',
+    'series',
+    'sessionTitle',
+    'citationKey',
+  ],
+  tvBroadcast: [
+    'programTitle',
+    'episodeNumber',
+    'videoRecordingFormat',
+    'network',
+    'place',
+    'runningTime',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  bill: [
+    'billNumber',
+    'code',
+    'codeVolume',
+    'section',
+    'codePages',
+    'legislativeBody',
+    'session',
+    'history',
+    'citationKey',
+  ],
+  report: [
+    'reportNumber',
+    'reportType',
+    'institution',
+    'place',
+    'seriesTitle',
+    'seriesNumber',
+    'pages',
+    'ISBN',
+    'citationKey',
+    'ISSN',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
   ],
   bookSection: [
     'bookTitle',
-    'publisher',
-    'place',
-    'ISBN',
-    'pages',
-    'edition',
     'series',
     'seriesNumber',
     'volume',
+    'numberOfVolumes',
+    'edition',
+    'publisher',
+    'place',
+    'originalDate',
+    'originalPublisher',
+    'originalPlace',
+    'format',
+    'pages',
+    'ISBN',
+    'citationKey',
+    'ISSN',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
   ],
-  thesis: ['university', 'place', 'thesisType', 'numPages'],
-  report: ['institution', 'reportNumber', 'place', 'pages', 'seriesTitle', 'seriesNumber'],
-  webpage: ['websiteTitle', 'websiteType'],
+  hearing: [
+    'committee',
+    'publisher',
+    'numberOfVolumes',
+    'documentNumber',
+    'pages',
+    'legislativeBody',
+    'session',
+    'history',
+    'place',
+    'citationKey',
+  ],
+  manuscript: [
+    'manuscriptType',
+    'institution',
+    'place',
+    'numPages',
+    'number',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  case: [
+    'caseName',
+    'court',
+    'dateDecided',
+    'docketNumber',
+    'reporter',
+    'reporterVolume',
+    'firstPage',
+    'history',
+    'citationKey',
+  ],
+  statute: [
+    'nameOfAct',
+    'code',
+    'codeNumber',
+    'publicLawNumber',
+    'dateEnacted',
+    'pages',
+    'section',
+    'session',
+    'history',
+    'citationKey',
+  ],
+  webpage: [
+    'websiteTitle',
+    'websiteType',
+    'publisher',
+    'place',
+    'citationKey',
+  ],
+  forumPost: [
+    'forumTitle',
+    'postType',
+    'citationKey',
+  ],
+  blogPost: [
+    'blogTitle',
+    'websiteType',
+    'citationKey',
+    'ISSN',
+  ],
+  interview: [
+    'interviewMedium',
+    'publisher',
+    'place',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
+  dataset: [
+    'identifier',
+    'type',
+    'versionNumber',
+    'repository',
+    'repositoryLocation',
+    'format',
+    'citationKey',
+    'archive',
+    'archiveLocation',
+    'libraryCatalog',
+    'callNumber',
+  ],
 };
 const MANUAL_COMMON_FIELDS = [
   'title',
@@ -142,6 +584,14 @@ function onOpen() {
     .createMenu('Zotero20')
     .addItem('Otwórz panel importu', 'showSidebar')
     .addToUi();
+}
+
+/**
+ * Wymagane dla instalacji jako add-on (Editor Add-on).
+ * Przy instalacji Google wywołuje onInstall zamiast samego onOpen.
+ */
+function onInstall(e) {
+  onOpen(e);
 }
 
 function showSidebar() {
@@ -247,13 +697,25 @@ function importOrcid(orcid, options, limit) {
 
 /**
  * Plan importu ORCID: lista DOI bez zapisu do Zotero.
- * Używane przez sidebar do chunkowanego importu z progressem.
+ * Gdy serwer nie ma jeszcze /import/orcid/plan (HTTP 404), zwraca
+ * { fallback: true } — sidebar używa wtedy klasycznego POST /import/orcid.
  */
 function planOrcidImport(orcid, limit) {
-  return apiPost('/import/orcid/plan', {
-    orcid: orcid,
-    limit: limit || 50,
-  });
+  try {
+    return apiPost('/import/orcid/plan', {
+      orcid: orcid,
+      limit: limit || 50,
+    });
+  } catch (e) {
+    var msg = String((e && e.message) || e || '');
+    if (/\b404\b/.test(msg) || /not found/i.test(msg)) {
+      return {
+        fallback: true,
+        reason: 'Server bez /import/orcid/plan — używam klasycznego importu ORCID.',
+      };
+    }
+    throw e;
+  }
 }
 
 /**
@@ -285,6 +747,257 @@ function importDoiWithRetry(doi, options, maxAttempts) {
  * Ręczne utworzenie pozycji Zotero (zakładka Inne).
  * payload: { itemType, title, creators, … } + options.collectionKey / study
  */
+/**
+ * Skanuje dokument pod kątem surowych placeholderów DOI w tekście:
+ * [10.xxxx/…], [doi:10.xxxx/…], [DOI:10.xxxx/…].
+ * Każde wystąpienie osobno (to samo DOI może wrócić wielokrotnie — celowo).
+ * Pomija fragmenty już oznaczone kotwicą cytowania Zotero20.
+ */
+function scanPlainDoiPlaceholders() {
+  var body = DocumentApp.getActiveDocument().getBody();
+  // findText: podzbiór regex Java. Bez (?i) — flagi znakowe dla „doi:”.
+  var re = '\\[(?:[Dd][Oo][Ii]:\\s*)?(10\\.\\S+?/[^\\]\\s]+)\\]';
+  var items = [];
+  var found = null;
+  try {
+    found = body.findText(re);
+  } catch (e) {
+    return {
+      count: 0,
+      items: [],
+      error: 'Skan DOI nieudany: ' + String((e && e.message) || e),
+    };
+  }
+  while (found) {
+    var textElement = found.getElement().asText();
+    var start = found.getStartOffset();
+    var end = found.getEndOffsetInclusive();
+    var raw = textElement.getText().substring(start, end + 1);
+    var url = '';
+    try {
+      url = textElement.getLinkUrl(start) || '';
+    } catch (ignore) {}
+    if (!(url && String(url).indexOf(CITE_LINK_BASE) === 0)) {
+      var inner = String(raw || '')
+        .replace(/^\[(?:doi:\s*)?/i, '')
+        .replace(/\]$/, '');
+      var doi = normalizeDoiIdentifier_(inner);
+      if (doi && /^10\.\S+\/\S+/i.test(doi)) {
+        items.push({ doi: doi, pattern: raw });
+      }
+    }
+    found = body.findText(re, found);
+  }
+  return { count: items.length, items: items };
+}
+
+/**
+ * Jedno wystąpienie DOI w tekście: import (albo użycie znanego itemKey) + zamiana
+ * pierwszego wolnego placeholdera na śledzone cytowanie. Bez pełnego restyle —
+ * wywołaj finalizePlainDoiResolve() po całej liście.
+ *
+ * options: { collectionKey|study, itemKey?, pattern?, maxAttempts? }
+ */
+function resolvePlainDoiInText(doi, options) {
+  options = options || {};
+  var normalized = normalizeDoiIdentifier_(doi);
+  if (!normalized || !/^10\.\S+\/\S+/i.test(normalized)) {
+    return { ok: false, doi: String(doi || ''), error: 'To nie wygląda na DOI.' };
+  }
+
+  var itemKey = normalizeItemKey_(options.itemKey || '');
+  var importedNow = false;
+  var duplicate = false;
+  var inCollection = null;
+  var retries = 0;
+
+  if (!itemKey) {
+    var target = {};
+    if (options.collectionKey) {
+      target.collectionKey = options.collectionKey;
+    } else if (options.study) {
+      target.study = options.study;
+    } else {
+      var def = getDefaultCollection();
+      if (def && def.key) target.collectionKey = def.key;
+    }
+    if (!target.collectionKey && !target.study) {
+      return {
+        ok: false,
+        doi: normalized,
+        error: 'Brak kolekcji dokumentu — ustaw ją w zakładce Ustawienia.',
+      };
+    }
+    var pack = importDoiWithRetry(normalized, target, options.maxAttempts || 3);
+    retries = pack.retries || 0;
+    if (!pack.ok) {
+      return {
+        ok: false,
+        doi: normalized,
+        error: pack.error || 'błąd importu',
+        retries: retries,
+      };
+    }
+    var r = pack.result || {};
+    itemKey = normalizeItemKey_(
+      r.item_key || extractItemKey_(r.result || r) || r.key || ''
+    );
+    duplicate = !!r.duplicate;
+    if (typeof r.in_collection !== 'undefined') {
+      inCollection = !!r.in_collection;
+    }
+    importedNow = !duplicate;
+    if (!itemKey) {
+      return {
+        ok: false,
+        doi: normalized,
+        error: 'Import zakończony, ale serwer nie zwrócił klucza pozycji.',
+        retries: retries,
+        duplicate: duplicate,
+      };
+    }
+  }
+
+  var citationText = '';
+  try {
+    citationText = resolveCitationDisplayText_(itemKey, getBibliographyStyle(), {
+      type: 'doi',
+      value: normalized,
+    });
+  } catch (e) {
+    return {
+      ok: false,
+      doi: normalized,
+      item_key: itemKey,
+      error: 'Nie udało się pobrać cytowania: ' + String((e && e.message) || e),
+      retries: retries,
+    };
+  }
+  if (!citationText) {
+    return {
+      ok: false,
+      doi: normalized,
+      item_key: itemKey,
+      error: 'Brak tekstu cytowania dla pozycji ' + itemKey + '.',
+      retries: retries,
+    };
+  }
+
+  var hoverTitle = citationHoverTitle_(citationText, '', '');
+  var patterns = buildPlainDoiReplacePatterns_(normalized, options.pattern);
+  var body = DocumentApp.getActiveDocument().getBody();
+  var replaced = null;
+  for (var i = 0; i < patterns.length; i++) {
+    replaced = replaceFirstUnlinkedLiteral_(
+      body,
+      patterns[i],
+      citationText,
+      itemKey,
+      hoverTitle,
+      normalized
+    );
+    if (replaced) break;
+  }
+  if (!replaced) {
+    return {
+      ok: false,
+      doi: normalized,
+      item_key: itemKey,
+      error:
+        'Nie znaleziono w dokumencie placeholdera [' +
+        normalized +
+        '] (może już zamieniony).',
+      retries: retries,
+    };
+  }
+
+  return {
+    ok: true,
+    doi: normalized,
+    item_key: itemKey,
+    citation_text: citationText,
+    pattern: replaced.pattern,
+    imported: importedNow,
+    duplicate: duplicate,
+    in_collection: inCollection,
+    retries: retries,
+  };
+}
+
+/** Po rozwiązaniu wielu DOI — jedna przeliczka numeracji / bibliografii. */
+function finalizePlainDoiResolve() {
+  try {
+    var skipBib =
+      getSkipEndBibliography() ||
+      getInlineFullReferenceMode() ||
+      !hasBibliographySection_();
+    var restyled = applyCitationStyle('', {
+      skipBibliography: skipBib,
+    });
+    return {
+      ok: true,
+      cited_count: restyled.cited_count,
+      numeric: !!restyled.numeric,
+      bibliography_refreshed: !!restyled.bibliography,
+      updated: restyled.updated,
+      message: restyled.message || '',
+    };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+function buildPlainDoiReplacePatterns_(doi, preferredPattern) {
+  var patterns = [];
+  if (preferredPattern) {
+    pushUniquePattern_(patterns, String(preferredPattern));
+  }
+  var d = normalizeDoiIdentifier_(doi);
+  if (!d) return patterns;
+  pushUniquePattern_(patterns, '[' + d + ']');
+  pushUniquePattern_(patterns, '[doi:' + d + ']');
+  pushUniquePattern_(patterns, '[DOI:' + d + ']');
+  return patterns;
+}
+
+/**
+ * Zamienia pierwsze wystąpienie dosłownego tekstu, które nie jest już kotwicą cytowania.
+ */
+function replaceFirstUnlinkedLiteral_(body, searchText, replacementText, itemKey, hoverTitle, doi) {
+  if (!searchText) return null;
+  var escaped = escapeRegexLiteral_(searchText);
+  var found = body.findText(escaped);
+  while (found) {
+    var textElement = found.getElement().asText();
+    var start = found.getStartOffset();
+    var end = found.getEndOffsetInclusive();
+    var url = '';
+    try {
+      url = textElement.getLinkUrl(start) || '';
+    } catch (ignore) {}
+    if (url && String(url).indexOf(CITE_LINK_BASE) === 0) {
+      found = body.findText(escaped, found);
+      continue;
+    }
+    textElement.deleteText(start, end);
+    textElement.insertText(start, replacementText);
+    if (itemKey) {
+      applyCitationLink_(
+        textElement,
+        start,
+        start + replacementText.length - 1,
+        itemKey,
+        newCitationId_(),
+        hoverTitle,
+        doi
+      );
+    }
+    return { pattern: searchText, text: replacementText };
+  }
+  return null;
+}
+
+
 function importManual(itemPayload, options) {
   var payload = {};
   var src = itemPayload || {};

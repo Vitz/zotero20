@@ -1,7 +1,9 @@
 # Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
-Wersja plików Apps Script: **2.3.4** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+Wersja plików Apps Script: **2.3.5** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+
+2.3.5: zakładka **Lista DOI**, rozwiązywanie `[10.…]` w tekście, pełne typy Zotero w **Inne**, fallback ORCID gdy `/import/orcid/plan` zwraca 404, `onInstall` + scope `script.scriptapp` (zachowane DeepL Write, inline full reference, klucze API w Ustawieniach).
 
 **Klucze API** (Zotero20 / Gemini / DeepL) wklejasz w panelu Docs — nie w edytorze Apps Script.
 

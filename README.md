@@ -22,7 +22,7 @@ Przenosimy **tylko storage i silnik** na serwer — **nie** przepisujemy CSL ani
 | Zmiana stylu, numeracja [1][2][3], ibid. | citeproc-js w Zotero Desktop na RPi |
 | Szybkie dodawanie źródeł | **nowe** — sidebar ORCID/DOI → API |
 
-Szczegóły instalacji w Docs: **[docs/google-docs-setup.md](docs/google-docs-setup.md)**  
+Szczegóły instalacji w Docs: **[docs/google-docs-setup.md](docs/google-docs-setup.md)**; Workspace Editor Add-on: **[docs/google-workspace-addon.md](docs/google-workspace-addon.md)**  
 API Zotero + Docker vs native: **[docs/zotero-api-and-docker.md](docs/zotero-api-and-docker.md)**  
 Limit UrlFetch / jak zwolnić: **[docs/urlfetch-throttling.md](docs/urlfetch-throttling.md)**
 

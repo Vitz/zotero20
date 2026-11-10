@@ -242,6 +242,7 @@
 
   <div class="tabs">
     <button type="button" onclick="showTab('doi')">Pojedynczy DOI</button>
+    <button type="button" onclick="showTab('lista')">Lista DOI</button>
     <button type="button" onclick="showTab('orcid')">Autor (ORCID)</button>
     <button type="button" onclick="showTab('inne')">Inne</button>
     <button type="button" onclick="showTab('deepl')">DeepL</button>
@@ -267,6 +268,23 @@
       <label for="study-doi">Badanie (opcjonalnie)</label>
       <select id="study-doi" disabled></select>
     </details>
+  </div>
+
+
+  <div id="tab-lista" class="tab">
+    <div id="current-collection-lista" class="current-collection" style="display:none;">
+      <strong>Kolekcja tego dokumentu</strong>
+      <span id="current-collection-lista-label"></span>
+    </div>
+    <label for="doi-list">Lista DOI</label>
+    <textarea id="doi-list" rows="9" spellcheck="false" style="width:100%;box-sizing:border-box;" placeholder="10.1016/j.watres.2017.02.047&#10;10.3390/w16213098"></textarea>
+    <p class="hint" style="font-size:11px;color:#555;margin-top:4px;">
+      Wklej DOI oddzielone odstępem lub nowym wierszem (działają też adresy <code>https://doi.org/…</code>).
+      Powtórzenia i pozycje już obecne w kolekcji są pomijane. Import idzie po jednym DOI i trzeba
+      zostawić panel otwarty. Większe listy lepiej dzielić na porcje po ok. 50.
+    </p>
+    <button id="btn-import-lista" type="button" onclick="doImportDoiList()" disabled>Importuj listę</button>
+    <button id="btn-stop-lista" type="button" onclick="stopDoiList()" style="display:none;">Zatrzymaj</button>
   </div>
 
   <div id="tab-orcid" class="tab">
@@ -306,13 +324,43 @@
 
     <label for="inne-item-type">Typ pozycji</label>
     <select id="inne-item-type" onchange="onInneTypeChange()">
-      <option value="preprint">Preprint / artykuł bez DOI</option>
       <option value="journalArticle">Artykuł (bez DOI)</option>
+      <option value="encyclopediaArticle">Artykuł w encyklopedii</option>
+      <option value="newspaperArticle">Artykuł z gazety</option>
+      <option value="magazineArticle">Artykuł z magazynu</option>
+      <option value="radioBroadcast">Audycja radiowa</option>
+      <option value="document">Dokument</option>
+      <option value="artwork">Dzieło sztuki</option>
+      <option value="email">E-mail</option>
+      <option value="film">Film</option>
+      <option value="dictionaryEntry">Hasło słownikowe</option>
+      <option value="instantMessage">Krótka wiadomość</option>
       <option value="book">Książka</option>
-      <option value="bookSection">Rozdział książki</option>
+      <option value="letter">List</option>
+      <option value="map">Mapa</option>
+      <option value="conferencePaper">Materiał konferencyjny</option>
+      <option value="audioRecording">Nagranie audio</option>
+      <option value="videoRecording">Nagranie wideo</option>
+      <option value="standard">Norma</option>
+      <option value="computerProgram">Oprogramowanie</option>
+      <option value="patent">Patent</option>
+      <option value="podcast">Podcast</option>
       <option value="thesis">Praca dyplomowa</option>
+      <option value="preprint">Preprint / artykuł bez DOI</option>
+      <option value="presentation">Prezentacja</option>
+      <option value="tvBroadcast">Program telewizyjny</option>
+      <option value="bill">Projekt ustawy</option>
       <option value="report">Raport</option>
+      <option value="bookSection">Rozdział książki</option>
+      <option value="hearing">Rozprawa</option>
+      <option value="manuscript">Rękopis</option>
+      <option value="case">Sprawa sądowa</option>
+      <option value="statute">Statut</option>
       <option value="webpage">Strona WWW</option>
+      <option value="forumPost">Wpis na forum</option>
+      <option value="blogPost">Wpis w blogu</option>
+      <option value="interview">Wywiad</option>
+      <option value="dataset">Zestaw danych</option>
     </select>
 
     <div id="inne-fields"></div>
@@ -537,6 +585,19 @@
     <button id="btn-refresh-biblio" type="button" onclick="doRefreshBibliography()" disabled>Odśwież bibliografię</button>
     <button id="btn-refresh-citations" type="button" onclick="doRefreshCitationList()">Odśwież listę cytowań</button>
 
+    <h3 style="margin:16px 0 6px;font-size:13px;">DOI w tekście</h3>
+    <p class="hint" style="font-size:11px;color:#555;margin-top:0;">
+      Szuka w dokumencie <code>[10.xxxx/…]</code> (także <code>[doi:10.…]</code>) i zamienia je
+      po kolei na śledzone cytowania. To samo DOI może wystąpić wiele razy — każde osobno.
+      Panel musi zostać otwarty do końca.
+    </p>
+    <button id="btn-resolve-dois" type="button" onclick="doResolvePlainDois()" disabled>
+      Rozwiąż DOI w tekście
+    </button>
+    <button id="btn-stop-resolve-dois" type="button" onclick="stopResolvePlainDois()" style="display:none;">
+      Zatrzymaj
+    </button>
+
     <p class="hint" style="font-size:11px;color:#555;margin-top:10px;">
       Bibliografia powstaje <strong>wyłącznie</strong> z pozycji cytowanych w dokumencie i trafia na jego koniec
       (nagłówek <strong>Bibliografia</strong> + wpisy). Trzymaj ją jako ostatnią sekcję.
@@ -750,7 +811,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.3.4';
+    var SIDEBAR_VERSION = '2.3.5';
 
     // UrlFetchApp: health co 5 min (wcześniej 3 s paliło dzienny limit).
     var HEALTH_POLL_MS = 300000;
@@ -932,14 +993,18 @@
       }
     }
 
+    // Lista DOI / DOI w tekście — stan importu z progressem.
+    var doiListState = { running: false, stop: false };
+    var resolveDoiState = { running: false, stop: false };
+
     function showTab(name) {
       document.querySelectorAll('.tab').forEach(function (el) { el.classList.remove('active'); });
       document.getElementById('tab-' + name).classList.add('active');
-      // Jedna lista „Pozycje w kolekcji” na DOI / ORCID / Inne / Kolekcja.
+      // Jedna lista „Pozycje w kolekcji” na DOI / Lista DOI / ORCID / Inne / Kolekcja.
       var overview = document.getElementById('study-overview');
       if (overview) {
         var showOverview =
-          name === 'doi' || name === 'orcid' || name === 'inne' || name === 'kolekcja';
+          name === 'doi' || name === 'lista' || name === 'orcid' || name === 'inne' || name === 'kolekcja';
         if (!showOverview) {
           overview.style.display = 'none';
         } else if (studyOverviewState.allItems.length || name === 'kolekcja') {
@@ -1783,6 +1848,10 @@
     function setImportEnabled(enabled) {
       document.getElementById('btn-import-doi').disabled = !enabled;
       document.getElementById('btn-import-orcid').disabled = !enabled;
+      var listaBtn = document.getElementById('btn-import-lista');
+      if (listaBtn) listaBtn.disabled = !enabled || doiListState.running;
+      var resolveBtn = document.getElementById('btn-resolve-dois');
+      if (resolveBtn) resolveBtn.disabled = !enabled || resolveDoiState.running;
       var inneBtn = document.getElementById('btn-import-inne');
       if (inneBtn) inneBtn.disabled = !enabled;
       setBibliographyEnabled(enabled);
@@ -2226,7 +2295,7 @@
     function updateCurrentCollectionLabels() {
       var label = appState.defaultCollection.name || appState.defaultCollection.key || '';
       var hasDefault = !!appState.defaultCollection.key;
-      ['doi', 'orcid', 'inne', 'biblio', 'kolekcja'].forEach(function (suffix) {
+      ['doi', 'lista', 'orcid', 'inne', 'biblio', 'kolekcja'].forEach(function (suffix) {
         var box = document.getElementById('current-collection-' + suffix);
         var text = document.getElementById('current-collection-' + suffix + '-label');
         if (hasDefault) {
@@ -2501,83 +2570,504 @@
     }
 
     var INNE_FIELD_DEFS = {
-      preprint: [
+      journalArticle: [
         { key: 'title', label: 'Tytuł', required: true },
+        { key: 'publicationTitle', label: 'Czasopismo / publikacja' },
+        { key: 'publisher', label: 'Wydawca' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'volume', label: 'Tom' },
+        { key: 'issue', label: 'Numer' },
+        { key: 'section', label: 'Sekcja' },
+        { key: 'partNumber', label: 'partNumber' },
         { key: 'date', label: 'Data' },
-        { key: 'repository', label: 'Repozytorium' },
-        { key: 'archiveID', label: 'ID w archiwum' },
         { key: 'url', label: 'URL' },
         { key: 'DOI', label: 'DOI (opcjonalnie)' },
         { key: 'abstractNote', label: 'Abstrakt', textarea: true },
-        { key: 'extra', label: 'Extra' }
+        { key: 'extra', label: 'Extra' },
       ],
-      journalArticle: [
+      encyclopediaArticle: [
         { key: 'title', label: 'Tytuł', required: true },
-        { key: 'publicationTitle', label: 'Czasopismo' },
+        { key: 'encyclopediaTitle', label: 'Tytuł encyklopedii' },
+        { key: 'series', label: 'Seria' },
+        { key: 'seriesNumber', label: 'Numer serii' },
+        { key: 'volume', label: 'Tom' },
+        { key: 'numberOfVolumes', label: 'numberOfVolumes' },
+        { key: 'edition', label: 'Wydanie' },
+        { key: 'publisher', label: 'Wydawca' },
         { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      newspaperArticle: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'publicationTitle', label: 'Czasopismo / publikacja' },
+        { key: 'publisher', label: 'Wydawca' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'volume', label: 'Tom' },
+        { key: 'issue', label: 'Numer' },
+        { key: 'edition', label: 'Wydanie' },
+        { key: 'section', label: 'Sekcja' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      magazineArticle: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'publicationTitle', label: 'Czasopismo / publikacja' },
+        { key: 'publisher', label: 'Wydawca' },
+        { key: 'place', label: 'Miejsce' },
         { key: 'volume', label: 'Tom' },
         { key: 'issue', label: 'Numer' },
         { key: 'pages', label: 'Strony' },
+        { key: 'ISSN', label: 'ISSN' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
         { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      radioBroadcast: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'programTitle', label: 'Tytuł programu' },
+        { key: 'episodeNumber', label: 'Numer odcinka' },
+        { key: 'audioRecordingFormat', label: 'Format audio' },
+        { key: 'network', label: 'Sieć' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'runningTime', label: 'Czas trwania' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      document: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'type', label: 'Typ' },
+        { key: 'publisher', label: 'Wydawca' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      artwork: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'artworkMedium', label: 'Technika' },
+        { key: 'artworkSize', label: 'Rozmiar' },
+        { key: 'eventPlace', label: 'eventPlace' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      email: [
+        { key: 'subject', label: 'Temat', required: true },
+        { key: 'date', label: 'Data' },
         { key: 'url', label: 'URL' },
         { key: 'abstractNote', label: 'Abstrakt', textarea: true },
-        { key: 'extra', label: 'Extra' }
+        { key: 'extra', label: 'Extra' },
+      ],
+      film: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'distributor', label: 'Dystrybutor' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'genre', label: 'Gatunek' },
+        { key: 'videoRecordingFormat', label: 'Format wideo' },
+        { key: 'runningTime', label: 'Czas trwania' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      dictionaryEntry: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'dictionaryTitle', label: 'Tytuł słownika' },
+        { key: 'series', label: 'Seria' },
+        { key: 'seriesNumber', label: 'Numer serii' },
+        { key: 'volume', label: 'Tom' },
+        { key: 'numberOfVolumes', label: 'numberOfVolumes' },
+        { key: 'edition', label: 'Wydanie' },
+        { key: 'publisher', label: 'Wydawca' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      instantMessage: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
       ],
       book: [
         { key: 'title', label: 'Tytuł', required: true },
-        { key: 'publisher', label: 'Wydawca' },
-        { key: 'place', label: 'Miejsce' },
-        { key: 'date', label: 'Data' },
-        { key: 'ISBN', label: 'ISBN' },
-        { key: 'numPages', label: 'Liczba stron' },
+        { key: 'series', label: 'Seria' },
+        { key: 'seriesNumber', label: 'Numer serii' },
+        { key: 'volume', label: 'Tom' },
+        { key: 'numberOfVolumes', label: 'numberOfVolumes' },
         { key: 'edition', label: 'Wydanie' },
-        { key: 'url', label: 'URL' },
-        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
-        { key: 'extra', label: 'Extra' }
-      ],
-      bookSection: [
-        { key: 'title', label: 'Tytuł rozdziału', required: true },
-        { key: 'bookTitle', label: 'Tytuł książki' },
         { key: 'publisher', label: 'Wydawca' },
         { key: 'place', label: 'Miejsce' },
         { key: 'date', label: 'Data' },
-        { key: 'pages', label: 'Strony' },
-        { key: 'ISBN', label: 'ISBN' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      letter: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'letterType', label: 'Typ listu' },
+        { key: 'eventPlace', label: 'eventPlace' },
+        { key: 'date', label: 'Data' },
         { key: 'url', label: 'URL' },
         { key: 'abstractNote', label: 'Abstrakt', textarea: true },
-        { key: 'extra', label: 'Extra' }
+        { key: 'extra', label: 'Extra' },
+      ],
+      map: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'mapType', label: 'Typ mapy' },
+        { key: 'scale', label: 'Skala' },
+        { key: 'seriesTitle', label: 'Tytuł serii' },
+        { key: 'edition', label: 'Wydanie' },
+        { key: 'publisher', label: 'Wydawca' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'ISBN', label: 'ISBN' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      conferencePaper: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'proceedingsTitle', label: 'Tytuł materiałów' },
+        { key: 'conferenceName', label: 'Nazwa konferencji' },
+        { key: 'publisher', label: 'Wydawca' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'eventPlace', label: 'eventPlace' },
+        { key: 'volume', label: 'Tom' },
+        { key: 'issue', label: 'Numer' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      audioRecording: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'audioRecordingFormat', label: 'Format audio' },
+        { key: 'seriesTitle', label: 'Tytuł serii' },
+        { key: 'volume', label: 'Tom' },
+        { key: 'numberOfVolumes', label: 'numberOfVolumes' },
+        { key: 'label', label: 'Wytwórnia' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'runningTime', label: 'Czas trwania' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      videoRecording: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'videoRecordingFormat', label: 'Format wideo' },
+        { key: 'seriesTitle', label: 'Tytuł serii' },
+        { key: 'volume', label: 'Tom' },
+        { key: 'numberOfVolumes', label: 'numberOfVolumes' },
+        { key: 'studio', label: 'Studio' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'runningTime', label: 'Czas trwania' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      standard: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'organization', label: 'Organizacja' },
+        { key: 'committee', label: 'Komitet' },
+        { key: 'type', label: 'Typ' },
+        { key: 'number', label: 'Numer' },
+        { key: 'versionNumber', label: 'Wersja' },
+        { key: 'edition', label: 'Wydanie' },
+        { key: 'status', label: 'Status' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      computerProgram: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'seriesTitle', label: 'Tytuł serii' },
+        { key: 'versionNumber', label: 'Wersja' },
+        { key: 'system', label: 'System' },
+        { key: 'company', label: 'Firma' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'programmingLanguage', label: 'Język programowania' },
+        { key: 'ISBN', label: 'ISBN' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      patent: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'country', label: 'Kraj' },
+        { key: 'assignee', label: 'Cesjonariusz' },
+        { key: 'issuingAuthority', label: 'Urząd' },
+        { key: 'patentNumber', label: 'Numer patentu' },
+        { key: 'filingDate', label: 'Data zgłoszenia' },
+        { key: 'pages', label: 'Strony' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      podcast: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'seriesTitle', label: 'Tytuł serii' },
+        { key: 'episodeNumber', label: 'Numer odcinka' },
+        { key: 'audioFileType', label: 'Typ pliku audio' },
+        { key: 'publisher', label: 'Wydawca' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'runningTime', label: 'Czas trwania' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
       ],
       thesis: [
         { key: 'title', label: 'Tytuł', required: true },
+        { key: 'thesisType', label: 'Typ pracy' },
         { key: 'university', label: 'Uczelnia' },
         { key: 'place', label: 'Miejsce' },
-        { key: 'thesisType', label: 'Typ pracy' },
-        { key: 'date', label: 'Data' },
+        { key: 'series', label: 'Seria' },
+        { key: 'seriesNumber', label: 'Numer serii' },
         { key: 'numPages', label: 'Liczba stron' },
+        { key: 'ISBN', label: 'ISBN' },
+        { key: 'date', label: 'Data' },
         { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
         { key: 'abstractNote', label: 'Abstrakt', textarea: true },
-        { key: 'extra', label: 'Extra' }
+        { key: 'extra', label: 'Extra' },
+      ],
+      preprint: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'genre', label: 'Gatunek' },
+        { key: 'repository', label: 'Repozytorium' },
+        { key: 'archiveID', label: 'ID w archiwum' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'series', label: 'Seria' },
+        { key: 'seriesNumber', label: 'Numer serii' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      presentation: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'presentationType', label: 'Typ prezentacji' },
+        { key: 'meetingName', label: 'Nazwa spotkania' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'series', label: 'Seria' },
+        { key: 'sessionTitle', label: 'sessionTitle' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      tvBroadcast: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'programTitle', label: 'Tytuł programu' },
+        { key: 'episodeNumber', label: 'Numer odcinka' },
+        { key: 'videoRecordingFormat', label: 'Format wideo' },
+        { key: 'network', label: 'Sieć' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'runningTime', label: 'Czas trwania' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      bill: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'billNumber', label: 'Numer projektu' },
+        { key: 'code', label: 'Kodeks' },
+        { key: 'codeVolume', label: 'codeVolume' },
+        { key: 'section', label: 'Sekcja' },
+        { key: 'codePages', label: 'codePages' },
+        { key: 'legislativeBody', label: 'Organ ustawodawczy' },
+        { key: 'session', label: 'Sesja' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
       ],
       report: [
         { key: 'title', label: 'Tytuł', required: true },
-        { key: 'institution', label: 'Instytucja' },
         { key: 'reportNumber', label: 'Numer raportu' },
+        { key: 'reportType', label: 'Typ raportu' },
+        { key: 'institution', label: 'Instytucja' },
         { key: 'place', label: 'Miejsce' },
-        { key: 'date', label: 'Data' },
+        { key: 'seriesTitle', label: 'Tytuł serii' },
+        { key: 'seriesNumber', label: 'Numer serii' },
         { key: 'pages', label: 'Strony' },
+        { key: 'date', label: 'Data' },
         { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
         { key: 'abstractNote', label: 'Abstrakt', textarea: true },
-        { key: 'extra', label: 'Extra' }
+        { key: 'extra', label: 'Extra' },
+      ],
+      bookSection: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'bookTitle', label: 'Tytuł książki' },
+        { key: 'series', label: 'Seria' },
+        { key: 'seriesNumber', label: 'Numer serii' },
+        { key: 'volume', label: 'Tom' },
+        { key: 'numberOfVolumes', label: 'numberOfVolumes' },
+        { key: 'edition', label: 'Wydanie' },
+        { key: 'publisher', label: 'Wydawca' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      hearing: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'committee', label: 'Komitet' },
+        { key: 'publisher', label: 'Wydawca' },
+        { key: 'numberOfVolumes', label: 'numberOfVolumes' },
+        { key: 'documentNumber', label: 'documentNumber' },
+        { key: 'pages', label: 'Strony' },
+        { key: 'legislativeBody', label: 'Organ ustawodawczy' },
+        { key: 'session', label: 'Sesja' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      manuscript: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'manuscriptType', label: 'Typ rękopisu' },
+        { key: 'institution', label: 'Instytucja' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'numPages', label: 'Liczba stron' },
+        { key: 'number', label: 'Numer' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      case: [
+        { key: 'caseName', label: 'Nazwa sprawy', required: true },
+        { key: 'court', label: 'Sąd' },
+        { key: 'dateDecided', label: 'Data orzeczenia' },
+        { key: 'docketNumber', label: 'Sygnatura' },
+        { key: 'reporter', label: 'Reporter' },
+        { key: 'reporterVolume', label: 'reporterVolume' },
+        { key: 'firstPage', label: 'Pierwsza strona' },
+        { key: 'history', label: 'history' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      statute: [
+        { key: 'nameOfAct', label: 'Nazwa aktu', required: true },
+        { key: 'code', label: 'Kodeks' },
+        { key: 'codeNumber', label: 'codeNumber' },
+        { key: 'publicLawNumber', label: 'Numer ustawy' },
+        { key: 'dateEnacted', label: 'Data uchwalenia' },
+        { key: 'pages', label: 'Strony' },
+        { key: 'section', label: 'Sekcja' },
+        { key: 'session', label: 'Sesja' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
       ],
       webpage: [
         { key: 'title', label: 'Tytuł', required: true },
         { key: 'websiteTitle', label: 'Nazwa strony' },
-        { key: 'url', label: 'URL' },
+        { key: 'websiteType', label: 'Typ strony' },
+        { key: 'publisher', label: 'Wydawca' },
+        { key: 'place', label: 'Miejsce' },
         { key: 'accessDate', label: 'Data dostępu' },
-        { key: 'date', label: 'Data publikacji' },
-        { key: 'abstractNote', label: 'Opis', textarea: true },
-        { key: 'extra', label: 'Extra' }
-      ]
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      forumPost: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'forumTitle', label: 'Tytuł forum' },
+        { key: 'postType', label: 'Typ wpisu' },
+        { key: 'accessDate', label: 'Data dostępu' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      blogPost: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'blogTitle', label: 'Tytuł bloga' },
+        { key: 'websiteType', label: 'Typ strony' },
+        { key: 'accessDate', label: 'Data dostępu' },
+        { key: 'ISSN', label: 'ISSN' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      interview: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'interviewMedium', label: 'Medium wywiadu' },
+        { key: 'publisher', label: 'Wydawca' },
+        { key: 'place', label: 'Miejsce' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
+      dataset: [
+        { key: 'title', label: 'Tytuł', required: true },
+        { key: 'identifier', label: 'Identyfikator' },
+        { key: 'type', label: 'Typ' },
+        { key: 'versionNumber', label: 'Wersja' },
+        { key: 'repository', label: 'Repozytorium' },
+        { key: 'repositoryLocation', label: 'repositoryLocation' },
+        { key: 'format', label: 'format' },
+        { key: 'date', label: 'Data' },
+        { key: 'url', label: 'URL' },
+        { key: 'DOI', label: 'DOI (opcjonalnie)' },
+        { key: 'abstractNote', label: 'Abstrakt', textarea: true },
+        { key: 'extra', label: 'Extra' },
+      ],
     };
 
     var inneFormReady = false;
@@ -3057,6 +3547,40 @@
       setStatus('Pobieram listę prac z ORCID…');
       google.script.run
         .withSuccessHandler(function (plan) {
+          if (plan && plan.fallback) {
+            setStatus('Serwer bez /orcid/plan — import klasyczny (retry ×3 na serwerze)…');
+            google.script.run
+              .withSuccessHandler(function (r) {
+                document.getElementById('btn-import-orcid').disabled = !appState.defaultCollection.key;
+                var s = r.summary || {};
+                var added = s.added_count || (r.added && r.added.length) || 0;
+                var skipped = s.skipped_count || (r.skipped && r.skipped.length) || 0;
+                var errors = s.error_count || (r.errors && r.errors.length) || 0;
+                var lines = [
+                  'ORCID zakończone (tryb klasyczny): dodano ' + added +
+                  ', pominięto ' + skipped +
+                  ', błędy ' + errors
+                ];
+                if (r.added && r.added.length) {
+                  lines.push('Dodane DOI: ' + r.added.slice(0, 8).join(', ') +
+                    (r.added.length > 8 ? '…' : ''));
+                }
+                if (r.errors && r.errors.length) {
+                  lines.push('Błędy (po 3 próbach na serwerze):');
+                  r.errors.slice(0, 5).forEach(function (err) {
+                    lines.push('• ' + ((err && err.doi) || '?') + ' — ' + ((err && err.message) || 'błąd'));
+                  });
+                }
+                setStatus(lines.join('\n'), errors > 0 && added === 0);
+                loadStudyOverview();
+              })
+              .withFailureHandler(function (e) {
+                document.getElementById('btn-import-orcid').disabled = !appState.defaultCollection.key;
+                setStatus(formatScriptError(e), true);
+              })
+              .importOrcid(orcid, target, limit);
+            return;
+          }
           var works = (plan && plan.works) || [];
           var skippedNoDoi = (plan && plan.skipped) || [];
           if (plan && plan.errors && plan.errors.length && !works.length) {
@@ -3172,6 +3696,325 @@
           runOrcidChunkImport(works, skippedNoDoi, target, index + 1, acc);
         })
         .importDoiWithRetry(doi, target, 3);
+    }
+
+    // Lista DOI / DOI w tekście (stan zadeklarowany wyżej).
+
+    function parseDoiList(text) {
+      var seen = {};
+      var dois = [];
+      var invalid = [];
+      // Tylko odstępy dzielą listę: starsze DOI zawierają średnik, np. 10.1175/…2.0.CO;2.
+      String(text || '').split(/\s+/).forEach(function (raw) {
+        var token = raw.replace(/^["'<(\[]+/, '').replace(/["'>)\],;.]+$/, '');
+        if (!token || /^doi:?$/i.test(token)) return;
+        // Nawias zamykający bywa częścią DOI, więc przy niedomkniętym nawiasie go przywracamy.
+        if (raw.indexOf(')') !== -1 && token.split('(').length > token.split(')').length) {
+          token += ')';
+        }
+        if (!looksLikeDoi(token)) {
+          invalid.push(raw);
+          return;
+        }
+        var doi = stripDoiPrefix(token);
+        var key = doi.toLowerCase();
+        if (!seen[key]) {
+          seen[key] = true;
+          dois.push(doi);
+        }
+      });
+      return { dois: dois, invalid: invalid };
+    }
+
+    function doImportDoiList() {
+      var box = document.getElementById('doi-list');
+      var parsed = parseDoiList(box.value);
+      if (!parsed.dois.length) {
+        setStatus('Nie znaleziono żadnego DOI na liście.', true);
+        return;
+      }
+      var target = resolveImportTarget('study-doi');
+      if (!target) return;
+      hidePostImport();
+      hideDuplicateOffer();
+      doiListState.running = true;
+      doiListState.stop = false;
+      document.getElementById('btn-import-lista').disabled = true;
+      document.getElementById('btn-stop-lista').style.display = '';
+      runDoiListImport(parsed.dois, target, 0, {
+        added: [],
+        inCollection: [],
+        inLibrary: [],
+        errors: [],
+        invalid: parsed.invalid,
+      });
+    }
+
+    function stopDoiList() {
+      doiListState.stop = true;
+      setStatus('Zatrzymuję po bieżącym DOI…');
+    }
+
+    function runDoiListImport(dois, target, index, acc) {
+      if (index >= dois.length || doiListState.stop) {
+        finishDoiListImport(dois, index, acc);
+        return;
+      }
+      var doi = dois[index];
+      setStatus(
+        'Lista DOI: ' + (index + 1) + '/' + dois.length +
+        ' · dodano ' + acc.added.length +
+        ' · już były ' + (acc.inCollection.length + acc.inLibrary.length) +
+        ' · błędy ' + acc.errors.length +
+        '\nTeraz: ' + doi
+      );
+      google.script.run
+        .withSuccessHandler(function (pack) {
+          if (pack && pack.ok && pack.result) {
+            var r = pack.result;
+            if (!r.duplicate) {
+              acc.added.push(doi);
+            } else if (r.in_collection === false) {
+              acc.inLibrary.push(doi);
+            } else {
+              acc.inCollection.push(doi);
+            }
+          } else {
+            acc.errors.push({ doi: doi, message: (pack && pack.error) || 'błąd importu' });
+          }
+          runDoiListImport(dois, target, index + 1, acc);
+        })
+        .withFailureHandler(function (e) {
+          acc.errors.push({ doi: doi, message: formatScriptError(e) });
+          runDoiListImport(dois, target, index + 1, acc);
+        })
+        .importDoiWithRetry(doi, target, 3);
+    }
+
+    function finishDoiListImport(dois, nextIndex, acc) {
+      var notDone = dois.slice(nextIndex);
+      var failed = acc.errors.map(function (e) { return e.doi; });
+      var lines = [
+        (notDone.length ? 'Lista DOI zatrzymana' : 'Lista DOI zakończona') +
+        ': dodano ' + acc.added.length + ' z ' + dois.length +
+        ', w kolekcji już było ' + acc.inCollection.length +
+        ', błędy ' + acc.errors.length,
+      ];
+      if (acc.inLibrary.length) {
+        lines.push(
+          'W bibliotece, ale poza tą kolekcją (' + acc.inLibrary.length + ', nie dodano do kolekcji): ' +
+          acc.inLibrary.join(', ')
+        );
+      }
+      if (acc.errors.length) {
+        lines.push('Błędy (po 3 próbach):');
+        acc.errors.slice(0, 5).forEach(function (e) {
+          lines.push('• ' + e.doi + ' — ' + e.message);
+        });
+        if (acc.errors.length > 5) {
+          lines.push('…i ' + (acc.errors.length - 5) + ' więcej');
+        }
+      }
+      if (acc.invalid.length) {
+        lines.push('Pominięto jako nie-DOI: ' + acc.invalid.slice(0, 5).join(', ') +
+          (acc.invalid.length > 5 ? '…' : ''));
+      }
+      if (notDone.length) {
+        lines.push('Nie przetworzono: ' + notDone.length + '.');
+      }
+      if (failed.length || notDone.length) {
+        lines.push('Na liście zostały DOI do ponownego importu.');
+      }
+      // Zostają tylko pozycje do ponowienia, żeby kolejny klik nie powtarzał całej listy.
+      document.getElementById('doi-list').value = failed.concat(notDone).join('\n');
+      doiListState.running = false;
+      document.getElementById('btn-stop-lista').style.display = 'none';
+      document.getElementById('btn-import-lista').disabled = !appState.defaultCollection.key;
+      // Czerwony status przy dowolnym błędzie (także częściowym), zielony tylko gdy zero błędów.
+      setStatus(lines.join('\n'), acc.errors.length > 0);
+      loadStudyOverview();
+    }
+
+    function doResolvePlainDois() {
+      if (resolveDoiState.running) return;
+      var target = resolveImportTarget('study-doi');
+      if (!target) return;
+      hidePostImport();
+      hideDuplicateOffer();
+      resolveDoiState.running = true;
+      resolveDoiState.stop = false;
+      document.getElementById('btn-resolve-dois').disabled = true;
+      document.getElementById('btn-stop-resolve-dois').style.display = '';
+      setStatus('Skanuję dokument pod kątem [10.xxxx/…]…');
+      google.script.run
+        .withSuccessHandler(function (scan) {
+          if (!scan || scan.error) {
+            finishResolvePlainDoisReport([], 0, {
+              resolved: [],
+              errors: [{ doi: '—', message: (scan && scan.error) || 'błąd skanu' }],
+              skippedStop: false,
+            });
+            return;
+          }
+          var items = (scan.items || []).slice();
+          if (!items.length) {
+            resolveDoiState.running = false;
+            document.getElementById('btn-stop-resolve-dois').style.display = 'none';
+            document.getElementById('btn-resolve-dois').disabled = !appState.defaultCollection.key;
+            setStatus('Brak surowych DOI w tekście (szukam [10.xxxx/…] i [doi:10.…]).', true);
+            return;
+          }
+          runResolvePlainDois(items, target, 0, {
+            resolved: [],
+            errors: [],
+            doiCache: {},
+          }, 0);
+        })
+        .withFailureHandler(function (e) {
+          finishResolvePlainDoisReport([], 0, {
+            resolved: [],
+            errors: [{ doi: '—', message: formatScriptError(e) }],
+            skippedStop: false,
+          });
+        })
+        .scanPlainDoiPlaceholders();
+    }
+
+    function stopResolvePlainDois() {
+      resolveDoiState.stop = true;
+      setStatus('Zatrzymuję po bieżącym DOI…');
+    }
+
+    function runResolvePlainDois(items, target, index, acc, attempt) {
+      if (index >= items.length || resolveDoiState.stop) {
+        finishResolvePlainDois(items, index, acc);
+        return;
+      }
+      var row = items[index] || {};
+      var doi = row.doi || '';
+      var pattern = row.pattern || '';
+      var tryNo = attempt || 0;
+      setStatus(
+        'DOI w tekście: ' + (index + 1) + '/' + items.length +
+        ' · OK ' + acc.resolved.length +
+        ' · błędy ' + acc.errors.length +
+        (tryNo ? ' · ponowienie ' + tryNo : '') +
+        '\nTeraz: ' + doi
+      );
+      var opts = {
+        maxAttempts: 3,
+        pattern: pattern,
+      };
+      if (target.collectionKey) opts.collectionKey = target.collectionKey;
+      if (target.study) opts.study = target.study;
+      var cacheKey = String(doi).toLowerCase();
+      if (acc.doiCache[cacheKey]) {
+        opts.itemKey = acc.doiCache[cacheKey];
+      }
+      google.script.run
+        .withSuccessHandler(function (pack) {
+          if (pack && pack.ok && pack.item_key) {
+            acc.doiCache[cacheKey] = pack.item_key;
+            acc.resolved.push({
+              doi: doi,
+              item_key: pack.item_key,
+              imported: !!pack.imported,
+              duplicate: !!pack.duplicate,
+            });
+            runResolvePlainDois(items, target, index + 1, acc, 0);
+            return;
+          }
+          var msg = (pack && pack.error) || 'błąd rozwiązania DOI';
+          if (tryNo < 2) {
+            setStatus(
+              'DOI w tekście: błąd, ponawiam za 1 s…\n' + doi + ' — ' + msg
+            );
+            window.setTimeout(function () {
+              runResolvePlainDois(items, target, index, acc, tryNo + 1);
+            }, 1000);
+            return;
+          }
+          acc.errors.push({ doi: doi, message: msg });
+          runResolvePlainDois(items, target, index + 1, acc, 0);
+        })
+        .withFailureHandler(function (e) {
+          var msg = formatScriptError(e);
+          if (tryNo < 2) {
+            setStatus(
+              'DOI w tekście: błąd skryptu, ponawiam za 1 s…\n' + doi + ' — ' + msg
+            );
+            window.setTimeout(function () {
+              runResolvePlainDois(items, target, index, acc, tryNo + 1);
+            }, 1000);
+            return;
+          }
+          acc.errors.push({ doi: doi, message: msg });
+          runResolvePlainDois(items, target, index + 1, acc, 0);
+        })
+        .resolvePlainDoiInText(doi, opts);
+    }
+
+    function finishResolvePlainDois(items, nextIndex, acc) {
+      var notDone = items.slice(nextIndex);
+      if (acc.resolved.length) {
+        setStatus(
+          'Przeliczam cytowania po rozwiązaniu ' + acc.resolved.length + ' DOI…'
+        );
+        google.script.run
+          .withSuccessHandler(function (fin) {
+            if (fin && !fin.ok) {
+              acc.errors.push({
+                doi: '(przeliczanie)',
+                message: fin.error || 'nie udało się przeliczyć stylu',
+              });
+            }
+            finishResolvePlainDoisReport(items, nextIndex, acc);
+          })
+          .withFailureHandler(function (e) {
+            acc.errors.push({ doi: '(przeliczanie)', message: formatScriptError(e) });
+            finishResolvePlainDoisReport(items, nextIndex, acc);
+          })
+          .finalizePlainDoiResolve();
+        return;
+      }
+      finishResolvePlainDoisReport(items, nextIndex, acc);
+    }
+
+    function finishResolvePlainDoisReport(items, nextIndex, acc) {
+      var notDone = items.slice(nextIndex);
+      var lines = [
+        (notDone.length ? 'Rozwiązywanie DOI zatrzymane' : 'Rozwiązywanie DOI zakończone') +
+        ': OK ' + acc.resolved.length + ' z ' + items.length +
+        ', błędy ' + acc.errors.length,
+      ];
+      if (acc.resolved.length) {
+        var uniq = {};
+        acc.resolved.forEach(function (r) {
+          uniq[String(r.doi).toLowerCase()] = r.doi;
+        });
+        var dois = Object.keys(uniq).map(function (k) { return uniq[k]; });
+        lines.push(
+          'Unikalne DOI: ' + dois.slice(0, 8).join(', ') + (dois.length > 8 ? '…' : '')
+        );
+      }
+      if (acc.errors.length) {
+        lines.push('Błędy:');
+        acc.errors.slice(0, 5).forEach(function (e) {
+          lines.push('• ' + e.doi + ' — ' + e.message);
+        });
+        if (acc.errors.length > 5) {
+          lines.push('…i ' + (acc.errors.length - 5) + ' więcej');
+        }
+      }
+      if (notDone.length) {
+        lines.push('Nie przetworzono: ' + notDone.length + ' (zostały w tekście jako [DOI]).');
+      }
+      resolveDoiState.running = false;
+      document.getElementById('btn-stop-resolve-dois').style.display = 'none';
+      document.getElementById('btn-resolve-dois').disabled = !appState.defaultCollection.key;
+      setStatus(lines.join('\n'), acc.errors.length > 0);
+      loadStudyOverview();
+      doRefreshCitationList();
     }
 
     function loadStatus() {

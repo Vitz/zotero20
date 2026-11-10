@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.2.6';
+const ADDON_VERSION = '2.3.0';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -16,6 +16,14 @@ const PROP_CITATION_INSERT_MODE = 'ZOTERO20_CITATION_INSERT_MODE';
 const PROP_CITATION_LOCALE = 'ZOTERO20_CITATION_LOCALE';
 const PROP_DEBUG = 'ZOTERO20_DEBUG';
 const PROP_GEMINI_API_KEY = 'ZOTERO20_GEMINI_API_KEY';
+const PROP_DEEPL_API_KEY = 'ZOTERO20_DEEPL_API_KEY';
+const PROP_DEEPL_PLAN = 'ZOTERO20_DEEPL_PLAN';
+const PROP_DEEPL_CHAIN = 'ZOTERO20_DEEPL_CHAIN';
+const PROP_DEEPL_OPTIONS = 'ZOTERO20_DEEPL_OPTIONS';
+const DEEPL_FREE_BASE = 'https://api-free.deepl.com';
+const DEEPL_PRO_BASE = 'https://api.deepl.com';
+const DEEPL_MAX_TEXT_LENGTH = 50000;
+const DEEPL_MAX_CHAIN_STEPS = 8;
 // Gemini REST — wywołanie z Apps Script (UrlFetch), bez Django/Cloudflare.
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const GEMINI_DEFAULT_MODEL = 'gemini-3.5-flash-lite';
@@ -2299,6 +2307,521 @@ function extractItemKey_(result) {
   }
   return '';
 }
+
+// ---------------------------------------------------------------------------
+// DeepL — wywołania bezpośrednie z Apps Script (UrlFetch), klucz w Script Properties
+// ---------------------------------------------------------------------------
+
+function getDeepLApiKey() {
+  var key = PropertiesService.getScriptProperties().getProperty(PROP_DEEPL_API_KEY);
+  return key ? String(key).trim() : '';
+}
+
+function hasDeepLApiKey() {
+  return !!getDeepLApiKey();
+}
+
+function saveDeepLApiKey(key) {
+  key = String(key || '').trim();
+  var props = PropertiesService.getScriptProperties();
+  if (!key) {
+    props.deleteProperty(PROP_DEEPL_API_KEY);
+    return { configured: false };
+  }
+  props.setProperty(PROP_DEEPL_API_KEY, key);
+  if (key.indexOf(':fx') >= 0) {
+    props.setProperty(PROP_DEEPL_PLAN, 'free');
+  }
+  return { configured: true, plan: getDeepLPlan() };
+}
+
+function getDeepLPlan() {
+  var plan = PropertiesService.getScriptProperties().getProperty(PROP_DEEPL_PLAN);
+  if (plan === 'pro' || plan === 'free') {
+    return plan;
+  }
+  var key = getDeepLApiKey();
+  return key.indexOf(':fx') >= 0 ? 'free' : 'pro';
+}
+
+function saveDeepLPlan(plan) {
+  plan = plan === 'pro' ? 'pro' : 'free';
+  PropertiesService.getScriptProperties().setProperty(PROP_DEEPL_PLAN, plan);
+  return getDeepLPlan();
+}
+
+function getDeepLBaseUrl_() {
+  return getDeepLPlan() === 'pro' ? DEEPL_PRO_BASE : DEEPL_FREE_BASE;
+}
+
+function getDeepLChain() {
+  var raw = PropertiesService.getDocumentProperties().getProperty(PROP_DEEPL_CHAIN);
+  if (!raw) {
+    return ['EN', 'PL'];
+  }
+  try {
+    var parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length) {
+      return parsed
+        .map(function (x) {
+          return String(x || '')
+            .trim()
+            .toUpperCase();
+        })
+        .filter(Boolean)
+        .slice(0, DEEPL_MAX_CHAIN_STEPS);
+    }
+  } catch (ignore) {}
+  return ['EN', 'PL'];
+}
+
+function saveDeepLChain(chain) {
+  if (!Array.isArray(chain)) {
+    throw new Error('Łańcuch tłumaczeń musi być listą kodów języków.');
+  }
+  var cleaned = [];
+  for (var i = 0; i < chain.length && cleaned.length < DEEPL_MAX_CHAIN_STEPS; i++) {
+    var code = String(chain[i] || '')
+      .trim()
+      .toUpperCase();
+    if (code) {
+      cleaned.push(code);
+    }
+  }
+  if (!cleaned.length) {
+    throw new Error('Dodaj przynajmniej jeden język docelowy w łańcuchu.');
+  }
+  PropertiesService.getDocumentProperties().setProperty(
+    PROP_DEEPL_CHAIN,
+    JSON.stringify(cleaned)
+  );
+  return cleaned;
+}
+
+function getDeepLOptions() {
+  var defaults = {
+    source_lang: '',
+    formality: 'default',
+    preserve_formatting: true,
+    split_sentences: '1',
+    tag_handling: '',
+    context: '',
+    model_type: '',
+    glossary_id: '',
+    show_billed_characters: true,
+  };
+  var raw = PropertiesService.getDocumentProperties().getProperty(PROP_DEEPL_OPTIONS);
+  if (!raw) {
+    return defaults;
+  }
+  try {
+    var parsed = JSON.parse(raw) || {};
+    Object.keys(defaults).forEach(function (k) {
+      if (parsed[k] !== undefined && parsed[k] !== null) {
+        defaults[k] = parsed[k];
+      }
+    });
+  } catch (ignore) {}
+  return defaults;
+}
+
+function saveDeepLOptions(options) {
+  options = options || {};
+  var current = getDeepLOptions();
+  Object.keys(current).forEach(function (k) {
+    if (options[k] !== undefined) {
+      current[k] = options[k];
+    }
+  });
+  PropertiesService.getDocumentProperties().setProperty(
+    PROP_DEEPL_OPTIONS,
+    JSON.stringify(current)
+  );
+  return current;
+}
+
+function getDeepLSettings() {
+  return {
+    configured: hasDeepLApiKey(),
+    plan: getDeepLPlan(),
+    chain: getDeepLChain(),
+    options: getDeepLOptions(),
+  };
+}
+
+function deeplFetch_(path, method, payload) {
+  var key = getDeepLApiKey();
+  if (!key) {
+    throw new Error('Brak klucza DeepL — ustaw go w zakładce DeepL.');
+  }
+  var url = getDeepLBaseUrl_() + path;
+  var opts = {
+    method: method || 'get',
+    muteHttpExceptions: true,
+    headers: {
+      Authorization: 'DeepL-Auth-Key ' + key,
+      Accept: 'application/json',
+    },
+  };
+  if (payload !== undefined && payload !== null) {
+    opts.contentType = 'application/json';
+    opts.payload = JSON.stringify(payload);
+  }
+  var response = UrlFetchApp.fetch(url, opts);
+  var code = response.getResponseCode();
+  var text = response.getContentText() || '';
+  var body = {};
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch (ignore) {
+    body = { raw: text.slice(0, 500) };
+  }
+  if (code >= 400) {
+    var detail =
+      (body && (body.message || body.error || body.detail)) ||
+      text.slice(0, 400) ||
+      'HTTP ' + code;
+    if (code === 403) {
+      detail =
+        'DeepL odrzucił klucz (403). Sprawdź klucz i plan Free/Pro — Free wymaga api-free.deepl.com.';
+    }
+    throw new Error('DeepL API błąd HTTP ' + code + ': ' + detail);
+  }
+  return body;
+}
+
+/** Lista języków DeepL (source|target). Fallback lokalny gdy API niedostępne. */
+function getDeepLLanguages(kind) {
+  kind = kind === 'source' ? 'source' : 'target';
+  try {
+    if (hasDeepLApiKey()) {
+      var data = deeplFetch_('/v2/languages?type=' + encodeURIComponent(kind), 'get', null);
+      if (Array.isArray(data) && data.length) {
+        return {
+          source: kind === 'source' ? data : null,
+          target: kind === 'target' ? data : null,
+          languages: data,
+          from_api: true,
+        };
+      }
+    }
+  } catch (e) {
+    if (getDebugMode()) {
+      // kontynuuj fallback
+    }
+  }
+  return {
+    languages: kind === 'source' ? DEEPL_SOURCE_FALLBACK_ : DEEPL_TARGET_FALLBACK_,
+    from_api: false,
+  };
+}
+
+function getDeepLUsage() {
+  return deeplFetch_('/v2/usage', 'get', null);
+}
+
+/**
+ * Tłumaczy zaznaczony tekst łańcuchem języków (A → B → C …).
+ * options.chain opcjonalnie nadpisuje zapisany łańcuch; options.* — parametry DeepL.
+ */
+function translateSelectedTextWithDeepL(options) {
+  options = options || {};
+  var selected = getSelectedPlainText_();
+  if (!selected.text) {
+    throw new Error('Zaznacz tekst w dokumencie do tłumaczenia.');
+  }
+  if (selected.text.length > DEEPL_MAX_TEXT_LENGTH) {
+    throw new Error(
+      'Zaznaczenie jest za długie (' +
+        selected.text.length +
+        ' znaków). Limit: ' +
+        DEEPL_MAX_TEXT_LENGTH +
+        '.'
+    );
+  }
+
+  if (options.chain) {
+    saveDeepLChain(options.chain);
+  }
+  if (options.options) {
+    saveDeepLOptions(options.options);
+  }
+
+  var chain = getDeepLChain();
+  var opts = getDeepLOptions();
+  if (options.source_lang !== undefined) {
+    opts.source_lang = options.source_lang;
+  }
+
+  var result = translateTextChainDeepL_(selected.text, chain, opts);
+  replaceSelectedPlainText_(selected, result.final_text);
+
+  return {
+    original: selected.text,
+    final_text: result.final_text,
+    steps: result.steps,
+    chain: chain,
+    billed_characters: result.billed_characters,
+  };
+}
+
+/** Tylko podgląd łańcucha — bez podmiany w dokumencie. */
+function previewDeepLChain(text, chain, options) {
+  text = String(text || '');
+  if (!text.trim()) {
+    throw new Error('Brak tekstu do podglądu.');
+  }
+  if (chain && chain.length) {
+    saveDeepLChain(chain);
+  }
+  if (options) {
+    saveDeepLOptions(options);
+  }
+  return translateTextChainDeepL_(text, getDeepLChain(), getDeepLOptions());
+}
+
+/** Podgląd łańcucha na zaznaczeniu — bez podmiany w dokumencie. */
+function previewSelectedTextWithDeepL(options) {
+  options = options || {};
+  var selected = getSelectedPlainText_();
+  if (options.chain) {
+    saveDeepLChain(options.chain);
+  }
+  if (options.options) {
+    saveDeepLOptions(options.options);
+  }
+  var opts = getDeepLOptions();
+  if (options.source_lang !== undefined) {
+    opts.source_lang = options.source_lang;
+  }
+  var result = translateTextChainDeepL_(selected.text, getDeepLChain(), opts);
+  return {
+    original: selected.text,
+    final_text: result.final_text,
+    steps: result.steps,
+    chain: getDeepLChain(),
+    billed_characters: result.billed_characters,
+    preview_only: true,
+  };
+}
+
+function translateTextChainDeepL_(text, chain, options) {
+  if (!hasDeepLApiKey()) {
+    throw new Error('Brak klucza DeepL — ustaw go w zakładce DeepL.');
+  }
+  chain = (chain || []).map(function (c) {
+    return String(c || '')
+      .trim()
+      .toUpperCase();
+  }).filter(Boolean);
+  if (!chain.length) {
+    throw new Error('Łańcuch tłumaczeń jest pusty.');
+  }
+  if (chain.length > DEEPL_MAX_CHAIN_STEPS) {
+    throw new Error('Maks. ' + DEEPL_MAX_CHAIN_STEPS + ' kroków w łańcuchu.');
+  }
+
+  options = options || getDeepLOptions();
+  var current = String(text);
+  var steps = [];
+  var billed = 0;
+  var sourceLang = String(options.source_lang || '').trim().toUpperCase();
+
+  for (var i = 0; i < chain.length; i++) {
+    var target = chain[i];
+    var payload = {
+      text: [current],
+      target_lang: target,
+    };
+    if (sourceLang) {
+      payload.source_lang = sourceLang;
+    }
+    if (options.formality && options.formality !== 'default') {
+      payload.formality = options.formality;
+    }
+    if (options.preserve_formatting === true || options.preserve_formatting === '1') {
+      payload.preserve_formatting = true;
+    } else if (options.preserve_formatting === false || options.preserve_formatting === '0') {
+      payload.preserve_formatting = false;
+    }
+    if (options.split_sentences !== undefined && options.split_sentences !== '') {
+      payload.split_sentences = String(options.split_sentences);
+    }
+    if (options.tag_handling) {
+      payload.tag_handling = String(options.tag_handling);
+    }
+    if (options.context) {
+      payload.context = String(options.context).slice(0, 2000);
+    }
+    if (options.model_type) {
+      payload.model_type = String(options.model_type);
+    }
+    if (options.glossary_id) {
+      payload.glossary_id = String(options.glossary_id).trim();
+      if (!payload.source_lang) {
+        throw new Error(
+          'Przy glossary_id DeepL wymaga source_lang — ustaw język źródłowy (nie auto).'
+        );
+      }
+    }
+    if (options.show_billed_characters) {
+      payload.show_billed_characters = true;
+    }
+
+    var body = deeplFetch_('/v2/translate', 'post', payload);
+    var tr =
+      body && body.translations && body.translations[0] ? body.translations[0] : null;
+    if (!tr || tr.text === undefined) {
+      throw new Error('DeepL nie zwrócił tłumaczenia w kroku ' + (i + 1) + ' → ' + target);
+    }
+    var out = String(tr.text);
+    var detected = String(tr.detected_source_language || sourceLang || '');
+    var stepBilled = Number(tr.billed_characters || 0) || current.length;
+    billed += stepBilled;
+    steps.push({
+      step: i + 1,
+      source_lang: detected || sourceLang || 'auto',
+      target_lang: target,
+      input: current,
+      output: out,
+      billed_characters: stepBilled,
+    });
+    current = out;
+    // Kolejny krok: źródłem jest poprzedni język docelowy (lepsza jakość łańcucha).
+    sourceLang = target.indexOf('-') > 0 ? target.split('-')[0] : target;
+  }
+
+  return {
+    final_text: current,
+    steps: steps,
+    billed_characters: billed,
+  };
+}
+
+function getSelectedPlainText_() {
+  var doc = DocumentApp.getActiveDocument();
+  var selection = doc.getSelection();
+  if (!selection) {
+    throw new Error('Zaznacz tekst w dokumencie (kursorem / myszą).');
+  }
+  var ranges = selection.getRangeElements();
+  if (!ranges || !ranges.length) {
+    throw new Error('Zaznaczenie jest puste.');
+  }
+  var parts = [];
+  var slices = [];
+  for (var i = 0; i < ranges.length; i++) {
+    var re = ranges[i];
+    var element = re.getElement();
+    if (!element.editAsText) {
+      continue;
+    }
+    var textEl = element.asText();
+    var full = textEl.getText() || '';
+    var start = re.isPartial() ? re.getStartOffset() : 0;
+    var end = re.isPartial() ? re.getEndOffsetInclusive() : full.length - 1;
+    if (end < start) {
+      continue;
+    }
+    parts.push(full.substring(start, end + 1));
+    slices.push({ textElement: textEl, start: start, end: end });
+  }
+  var text = parts.join('');
+  if (!String(text).trim()) {
+    throw new Error('Zaznaczony tekst jest pusty.');
+  }
+  return { text: text, slices: slices };
+}
+
+/**
+ * Podmienia zaznaczenie: czyści wszystkie slice'y, wstawia wynik w pierwszym.
+ * Prosty model — działa dla typowego zaznaczenia ciągłego.
+ */
+function replaceSelectedPlainText_(selected, newText) {
+  newText = String(newText || '');
+  var slices = selected.slices || [];
+  if (!slices.length) {
+    throw new Error('Brak zakresu tekstu do podmiany.');
+  }
+  // Od końca — nie przesuwamy offsetów wcześniejszych fragmentów.
+  for (var i = slices.length - 1; i >= 1; i--) {
+    var s = slices[i];
+    if (s.end >= s.start) {
+      s.textElement.deleteText(s.start, s.end);
+    }
+  }
+  var first = slices[0];
+  if (first.end >= first.start) {
+    first.textElement.deleteText(first.start, first.end);
+  }
+  first.textElement.insertText(first.start, newText);
+}
+
+var DEEPL_SOURCE_FALLBACK_ = [
+  { language: 'BG', name: 'Bulgarian' },
+  { language: 'CS', name: 'Czech' },
+  { language: 'DA', name: 'Danish' },
+  { language: 'DE', name: 'German' },
+  { language: 'EL', name: 'Greek' },
+  { language: 'EN', name: 'English' },
+  { language: 'ES', name: 'Spanish' },
+  { language: 'ET', name: 'Estonian' },
+  { language: 'FI', name: 'Finnish' },
+  { language: 'FR', name: 'French' },
+  { language: 'HU', name: 'Hungarian' },
+  { language: 'ID', name: 'Indonesian' },
+  { language: 'IT', name: 'Italian' },
+  { language: 'JA', name: 'Japanese' },
+  { language: 'KO', name: 'Korean' },
+  { language: 'LT', name: 'Lithuanian' },
+  { language: 'LV', name: 'Latvian' },
+  { language: 'NB', name: 'Norwegian' },
+  { language: 'NL', name: 'Dutch' },
+  { language: 'PL', name: 'Polish' },
+  { language: 'PT', name: 'Portuguese' },
+  { language: 'RO', name: 'Romanian' },
+  { language: 'RU', name: 'Russian' },
+  { language: 'SK', name: 'Slovak' },
+  { language: 'SL', name: 'Slovenian' },
+  { language: 'SV', name: 'Swedish' },
+  { language: 'TR', name: 'Turkish' },
+  { language: 'UK', name: 'Ukrainian' },
+  { language: 'ZH', name: 'Chinese' },
+];
+
+var DEEPL_TARGET_FALLBACK_ = [
+  { language: 'BG', name: 'Bulgarian' },
+  { language: 'CS', name: 'Czech' },
+  { language: 'DA', name: 'Danish' },
+  { language: 'DE', name: 'German' },
+  { language: 'EL', name: 'Greek' },
+  { language: 'EN-GB', name: 'English (British)' },
+  { language: 'EN-US', name: 'English (American)' },
+  { language: 'ES', name: 'Spanish' },
+  { language: 'ET', name: 'Estonian' },
+  { language: 'FI', name: 'Finnish' },
+  { language: 'FR', name: 'French' },
+  { language: 'HU', name: 'Hungarian' },
+  { language: 'ID', name: 'Indonesian' },
+  { language: 'IT', name: 'Italian' },
+  { language: 'JA', name: 'Japanese' },
+  { language: 'KO', name: 'Korean' },
+  { language: 'LT', name: 'Lithuanian' },
+  { language: 'LV', name: 'Latvian' },
+  { language: 'NB', name: 'Norwegian' },
+  { language: 'NL', name: 'Dutch' },
+  { language: 'PL', name: 'Polish' },
+  { language: 'PT-BR', name: 'Portuguese (Brazilian)' },
+  { language: 'PT-PT', name: 'Portuguese (European)' },
+  { language: 'RO', name: 'Romanian' },
+  { language: 'RU', name: 'Russian' },
+  { language: 'SK', name: 'Slovak' },
+  { language: 'SL', name: 'Slovenian' },
+  { language: 'SV', name: 'Swedish' },
+  { language: 'TR', name: 'Turkish' },
+  { language: 'UK', name: 'Ukrainian' },
+  { language: 'ZH', name: 'Chinese (simplified)' },
+];
 
 function apiGet(path) {
   if (getDebugMode() && path.indexOf('debug=') < 0) {

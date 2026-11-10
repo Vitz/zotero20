@@ -244,6 +244,7 @@
     <button type="button" onclick="showTab('doi')">Pojedynczy DOI</button>
     <button type="button" onclick="showTab('orcid')">Autor (ORCID)</button>
     <button type="button" onclick="showTab('inne')">Inne</button>
+    <button type="button" onclick="showTab('deepl')">DeepL</button>
     <button type="button" onclick="showTab('kolekcja')">Kolekcja</button>
     <button type="button" onclick="showTab('biblio')">Cytowania</button>
     <button type="button" onclick="showTab('settings')">Ustawienia</button>
@@ -343,6 +344,111 @@
     <button id="btn-import-inne" type="button" onclick="doImportInne()" disabled style="margin-top:12px;">
       Utwórz w kolekcji
     </button>
+  </div>
+
+  <div id="tab-deepl" class="tab">
+    <h3 style="margin:0 0 6px;font-size:13px;">DeepL — tłumaczenie zaznaczenia</h3>
+    <p class="hint" style="font-size:11px;color:#555;margin:0 0 8px;">
+      Zaznacz tekst w dokumencie, ustaw łańcuch języków (A → B → C…), potem
+      <strong>Tłumacz zaznaczony tekst</strong>. Każdy krok bierze wynik poprzedniego.
+      Klucz zostaje w Script Properties (nie w repo). Wywołanie idzie bezpośrednio do DeepL.
+    </p>
+
+    <label for="deepl-api-key">Klucz API DeepL</label>
+    <input id="deepl-api-key" type="password" autocomplete="off" spellcheck="false"
+      placeholder="DeepL-Auth-Key… (Free kończy się na :fx)">
+    <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap;">
+      <label for="deepl-plan" style="margin:0;">Plan</label>
+      <select id="deepl-plan" style="width:auto;min-width:110px;">
+        <option value="free">Free (api-free)</option>
+        <option value="pro">Pro (api.deepl.com)</option>
+      </select>
+      <button type="button" id="btn-save-deepl-key" onclick="saveDeepLKeyFromUi()">Zapisz klucz</button>
+    </div>
+    <p id="deepl-key-status" class="hint" style="font-size:11px;color:#555;margin-top:6px;"></p>
+    <p id="deepl-usage" class="hint" style="font-size:11px;color:#555;margin-top:4px;"></p>
+    <button type="button" id="btn-deepl-usage" onclick="refreshDeepLUsage()" style="margin-top:4px;">
+      Odśwież zużycie znaków
+    </button>
+
+    <h3 style="margin:16px 0 6px;font-size:13px;">Łańcuch tłumaczeń</h3>
+    <p class="hint" style="font-size:11px;color:#555;margin:0 0 8px;">
+      Kolejność = kolejność wywołań DeepL. Przykład: <code>EN → PL → DE → EN</code>
+      (przełożenie przez pośrednie języki i powrót).
+    </p>
+    <div id="deepl-chain-list"></div>
+    <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center;">
+      <select id="deepl-add-lang" style="width:auto;min-width:160px;flex:1;"></select>
+      <button type="button" onclick="addDeepLChainStep()">+ Dodaj język</button>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+      <button type="button" onclick="saveDeepLChainFromUi()">Zapisz łańcuch</button>
+      <button type="button" onclick="resetDeepLChainPreset()">Preset EN→PL</button>
+      <button type="button" onclick="applyDeepLChainPreset(['EN-US','PL','DE','EN-US'])">Preset EN→PL→DE→EN</button>
+    </div>
+
+    <h3 style="margin:16px 0 6px;font-size:13px;">Opcje DeepL</h3>
+    <label for="deepl-source-lang">Język źródłowy (1. krok)</label>
+    <select id="deepl-source-lang">
+      <option value="">Auto-detect</option>
+    </select>
+
+    <label for="deepl-formality">Formalność</label>
+    <select id="deepl-formality">
+      <option value="default">Domyślna</option>
+      <option value="more">Bardziej formalna</option>
+      <option value="less">Mniej formalna</option>
+      <option value="prefer_more">Preferuj formalną (fallback)</option>
+      <option value="prefer_less">Preferuj nieformalną (fallback)</option>
+    </select>
+
+    <label for="deepl-split">Dzielenie zdań</label>
+    <select id="deepl-split">
+      <option value="1">Włączone (domyślnie)</option>
+      <option value="0">Wyłączone</option>
+      <option value="nonewlines">Bez nowych linii jako separatorów</option>
+    </select>
+
+    <label for="deepl-tag-handling">Tag handling</label>
+    <select id="deepl-tag-handling">
+      <option value="">Wyłączone</option>
+      <option value="html">HTML</option>
+      <option value="xml">XML</option>
+    </select>
+
+    <label for="deepl-model-type">Model</label>
+    <select id="deepl-model-type">
+      <option value="">Domyślny DeepL</option>
+      <option value="latency_optimized">latency_optimized</option>
+      <option value="quality_optimized">quality_optimized</option>
+      <option value="prefer_quality_optimized">prefer_quality_optimized</option>
+    </select>
+
+    <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin-top:8px;">
+      <input id="deepl-preserve-formatting" type="checkbox" checked>
+      Zachowaj formatowanie (preserve_formatting)
+    </label>
+    <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin-top:4px;">
+      <input id="deepl-show-billed" type="checkbox" checked>
+      Pokaż billed_characters
+    </label>
+
+    <label for="deepl-glossary-id">Glossary ID (opcjonalnie)</label>
+    <input id="deepl-glossary-id" type="text" placeholder="uuid słownika DeepL" spellcheck="false">
+    <label for="deepl-context">Kontekst (opcjonalnie, do 2000 znaków)</label>
+    <textarea id="deepl-context" rows="3" placeholder="Dodatkowy kontekst dla modelu DeepL…"></textarea>
+
+    <button type="button" onclick="saveDeepLOptionsFromUi()" style="margin-top:8px;">Zapisz opcje</button>
+
+    <button id="btn-deepl-translate" type="button" onclick="doDeepLTranslateSelection()"
+      style="margin-top:14px;font-weight:600;">
+      Tłumacz zaznaczony tekst
+    </button>
+    <button type="button" onclick="doDeepLPreviewSelection()" style="margin-top:6px;">
+      Podgląd łańcucha (bez podmiany)
+    </button>
+
+    <pre id="deepl-result" style="margin:10px 0 0;padding:8px;background:#f5f5f5;border-radius:4px;font-size:11px;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;"></pre>
   </div>
 
   <div id="tab-biblio" class="tab">
@@ -554,7 +660,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.2.6';
+    var SIDEBAR_VERSION = '2.3.0';
 
     // UrlFetchApp: health co 5 min (wcześniej 3 s paliło dzienny limit).
     var HEALTH_POLL_MS = 300000;
@@ -753,6 +859,9 @@
       if (name === 'settings') {
         loadStatus();
         loadGeminiKeyStatus();
+      }
+      if (name === 'deepl') {
+        initDeepLTab();
       }
       if (name === 'kolekcja') {
         loadStudyOverview();
@@ -2893,6 +3002,425 @@
           document.getElementById('status-text').textContent = e.message;
         })
         .getLastStatus();
+    }
+
+    // ----- DeepL tab -----
+    var deeplState = {
+      chain: ['EN-US', 'PL'],
+      targetLangs: [],
+      sourceLangs: [],
+      loaded: false,
+    };
+
+    function initDeepLTab() {
+      google.script.run
+        .withSuccessHandler(function (s) {
+          s = s || {};
+          deeplState.chain = (s.chain && s.chain.length) ? s.chain.slice() : ['EN-US', 'PL'];
+          if (s.plan) {
+            document.getElementById('deepl-plan').value = s.plan;
+          }
+          document.getElementById('deepl-key-status').textContent = s.configured
+            ? 'Klucz DeepL zapisany (plan: ' + (s.plan || '?') + ').'
+            : 'Brak klucza — wklej z https://www.deepl.com/pro-api';
+          applyDeepLOptionsToForm(s.options || {});
+          renderDeepLChain();
+          loadDeepLLanguages(!!s.configured);
+          if (s.configured) {
+            refreshDeepLUsage();
+          }
+          deeplState.loaded = true;
+        })
+        .withFailureHandler(function (e) {
+          setStatus(formatScriptError(e), true);
+        })
+        .getDeepLSettings();
+    }
+
+    function applyDeepLOptionsToForm(opts) {
+      opts = opts || {};
+      document.getElementById('deepl-formality').value = opts.formality || 'default';
+      document.getElementById('deepl-split').value =
+        opts.split_sentences !== undefined && opts.split_sentences !== null
+          ? String(opts.split_sentences)
+          : '1';
+      document.getElementById('deepl-tag-handling').value = opts.tag_handling || '';
+      document.getElementById('deepl-model-type').value = opts.model_type || '';
+      document.getElementById('deepl-preserve-formatting').checked =
+        opts.preserve_formatting !== false;
+      document.getElementById('deepl-show-billed').checked =
+        opts.show_billed_characters !== false;
+      document.getElementById('deepl-glossary-id').value = opts.glossary_id || '';
+      document.getElementById('deepl-context').value = opts.context || '';
+      var src = document.getElementById('deepl-source-lang');
+      if (src && opts.source_lang) {
+        src.value = opts.source_lang;
+      }
+    }
+
+    function collectDeepLOptionsFromForm() {
+      return {
+        source_lang: document.getElementById('deepl-source-lang').value || '',
+        formality: document.getElementById('deepl-formality').value || 'default',
+        preserve_formatting: !!document.getElementById('deepl-preserve-formatting').checked,
+        split_sentences: document.getElementById('deepl-split').value,
+        tag_handling: document.getElementById('deepl-tag-handling').value || '',
+        model_type: document.getElementById('deepl-model-type').value || '',
+        glossary_id: document.getElementById('deepl-glossary-id').value.trim(),
+        context: document.getElementById('deepl-context').value || '',
+        show_billed_characters: !!document.getElementById('deepl-show-billed').checked,
+      };
+    }
+
+    function langLabel(code, list) {
+      list = list || deeplState.targetLangs || [];
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].language === code) {
+          return code + ' — ' + (list[i].name || code);
+        }
+      }
+      return code;
+    }
+
+    function fillDeepLLangSelect(selectEl, languages, includeAuto) {
+      if (!selectEl) return;
+      var current = selectEl.value;
+      selectEl.innerHTML = '';
+      if (includeAuto) {
+        var auto = document.createElement('option');
+        auto.value = '';
+        auto.textContent = 'Auto-detect';
+        selectEl.appendChild(auto);
+      }
+      (languages || []).forEach(function (lang) {
+        var opt = document.createElement('option');
+        opt.value = lang.language;
+        opt.textContent = lang.language + ' — ' + (lang.name || lang.language);
+        selectEl.appendChild(opt);
+      });
+      if (current) {
+        selectEl.value = current;
+      }
+    }
+
+    function loadDeepLLanguages(hasKey) {
+      var addSel = document.getElementById('deepl-add-lang');
+      var srcSel = document.getElementById('deepl-source-lang');
+      function applyFallback() {
+        // Fallback listy są po stronie Code.gs — tu tymczasowy zestaw.
+        var basic = [
+          { language: 'EN-US', name: 'English (American)' },
+          { language: 'EN-GB', name: 'English (British)' },
+          { language: 'PL', name: 'Polish' },
+          { language: 'DE', name: 'German' },
+          { language: 'FR', name: 'French' },
+          { language: 'ES', name: 'Spanish' },
+          { language: 'IT', name: 'Italian' },
+          { language: 'PT-PT', name: 'Portuguese' },
+          { language: 'UK', name: 'Ukrainian' },
+          { language: 'RU', name: 'Russian' },
+          { language: 'JA', name: 'Japanese' },
+          { language: 'ZH', name: 'Chinese' },
+        ];
+        deeplState.targetLangs = basic;
+        deeplState.sourceLangs = basic.map(function (l) {
+          return { language: l.language.split('-')[0], name: l.name };
+        });
+        fillDeepLLangSelect(addSel, deeplState.targetLangs, false);
+        fillDeepLLangSelect(srcSel, deeplState.sourceLangs, true);
+        renderDeepLChain();
+      }
+
+      if (!hasKey) {
+        applyFallback();
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function (res) {
+          var langs = (res && res.languages) || [];
+          deeplState.targetLangs = langs.length ? langs : deeplState.targetLangs;
+          fillDeepLLangSelect(addSel, deeplState.targetLangs, false);
+          renderDeepLChain();
+        })
+        .withFailureHandler(function () {
+          applyFallback();
+        })
+        .getDeepLLanguages('target');
+
+      google.script.run
+        .withSuccessHandler(function (res) {
+          var langs = (res && res.languages) || [];
+          deeplState.sourceLangs = langs.length ? langs : deeplState.sourceLangs;
+          fillDeepLLangSelect(srcSel, deeplState.sourceLangs, true);
+          var opts = collectDeepLOptionsFromForm();
+          if (opts.source_lang) {
+            srcSel.value = opts.source_lang;
+          }
+        })
+        .withFailureHandler(function () {})
+        .getDeepLLanguages('source');
+    }
+
+    function renderDeepLChain() {
+      var box = document.getElementById('deepl-chain-list');
+      if (!box) return;
+      box.innerHTML = '';
+      if (!deeplState.chain.length) {
+        box.innerHTML = '<p class="hint">Łańcuch pusty — dodaj język.</p>';
+        return;
+      }
+      deeplState.chain.forEach(function (code, idx) {
+        var row = document.createElement('div');
+        row.style.cssText =
+          'display:flex;align-items:center;gap:6px;margin:4px 0;font-size:12px;';
+        var label = document.createElement('span');
+        label.style.flex = '1';
+        label.textContent =
+          (idx + 1) + '. ' + langLabel(code, deeplState.targetLangs) +
+          (idx === 0 ? '' : ' ← z wyniku kroku ' + idx);
+        row.appendChild(label);
+
+        var up = document.createElement('button');
+        up.type = 'button';
+        up.textContent = '↑';
+        up.title = 'W górę';
+        up.onclick = function () { moveDeepLChainStep(idx, -1); };
+        up.disabled = idx === 0;
+        row.appendChild(up);
+
+        var down = document.createElement('button');
+        down.type = 'button';
+        down.textContent = '↓';
+        down.title = 'W dół';
+        down.onclick = function () { moveDeepLChainStep(idx, 1); };
+        down.disabled = idx === deeplState.chain.length - 1;
+        row.appendChild(down);
+
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.textContent = '×';
+        del.title = 'Usuń';
+        del.onclick = function () { removeDeepLChainStep(idx); };
+        row.appendChild(del);
+
+        box.appendChild(row);
+      });
+      var path = document.createElement('p');
+      path.className = 'hint';
+      path.style.cssText = 'font-size:11px;color:#555;margin-top:6px;';
+      path.textContent = 'Ścieżka: ' + deeplState.chain.join(' → ');
+      box.appendChild(path);
+    }
+
+    function addDeepLChainStep() {
+      var sel = document.getElementById('deepl-add-lang');
+      var code = (sel && sel.value) || '';
+      if (!code) {
+        setStatus('Wybierz język do dodania.', true);
+        return;
+      }
+      if (deeplState.chain.length >= 8) {
+        setStatus('Maks. 8 kroków w łańcuchu.', true);
+        return;
+      }
+      deeplState.chain.push(code);
+      renderDeepLChain();
+    }
+
+    function removeDeepLChainStep(idx) {
+      deeplState.chain.splice(idx, 1);
+      renderDeepLChain();
+    }
+
+    function moveDeepLChainStep(idx, delta) {
+      var j = idx + delta;
+      if (j < 0 || j >= deeplState.chain.length) return;
+      var tmp = deeplState.chain[idx];
+      deeplState.chain[idx] = deeplState.chain[j];
+      deeplState.chain[j] = tmp;
+      renderDeepLChain();
+    }
+
+    function resetDeepLChainPreset() {
+      applyDeepLChainPreset(['EN-US', 'PL']);
+    }
+
+    function applyDeepLChainPreset(list) {
+      deeplState.chain = (list || []).slice();
+      renderDeepLChain();
+      saveDeepLChainFromUi();
+    }
+
+    function saveDeepLKeyFromUi() {
+      var key = document.getElementById('deepl-api-key').value.trim();
+      var plan = document.getElementById('deepl-plan').value;
+      setStatus('Zapisuję klucz DeepL…');
+      google.script.run
+        .withSuccessHandler(function () {
+          google.script.run
+            .withSuccessHandler(function (r) {
+              document.getElementById('deepl-api-key').value = '';
+              document.getElementById('deepl-key-status').textContent = r.configured
+                ? 'Klucz DeepL zapisany (plan: ' + (r.plan || plan) + ').'
+                : 'Klucz usunięty.';
+              setStatus(r.configured ? 'Zapisano klucz DeepL.' : 'Usunięto klucz DeepL.');
+              loadDeepLLanguages(!!r.configured);
+              if (r.configured) refreshDeepLUsage();
+            })
+            .withFailureHandler(function (e) {
+              setStatus(formatScriptError(e), true);
+            })
+            .saveDeepLApiKey(key);
+        })
+        .withFailureHandler(function (e) {
+          setStatus(formatScriptError(e), true);
+        })
+        .saveDeepLPlan(plan);
+    }
+
+    function saveDeepLChainFromUi() {
+      setStatus('Zapisuję łańcuch…');
+      google.script.run
+        .withSuccessHandler(function (chain) {
+          deeplState.chain = chain || deeplState.chain;
+          renderDeepLChain();
+          setStatus('Zapisano łańcuch: ' + (chain || []).join(' → '));
+        })
+        .withFailureHandler(function (e) {
+          setStatus(formatScriptError(e), true);
+        })
+        .saveDeepLChain(deeplState.chain);
+    }
+
+    function saveDeepLOptionsFromUi() {
+      var opts = collectDeepLOptionsFromForm();
+      setStatus('Zapisuję opcje DeepL…');
+      google.script.run
+        .withSuccessHandler(function () {
+          setStatus('Zapisano opcje DeepL.');
+        })
+        .withFailureHandler(function (e) {
+          setStatus(formatScriptError(e), true);
+        })
+        .saveDeepLOptions(opts);
+    }
+
+    function refreshDeepLUsage() {
+      var el = document.getElementById('deepl-usage');
+      el.textContent = 'Pobieram zużycie…';
+      google.script.run
+        .withSuccessHandler(function (u) {
+          if (!u) {
+            el.textContent = '';
+            return;
+          }
+          var used = u.character_count != null ? u.character_count : '?';
+          var limit = u.character_limit != null ? u.character_limit : '?';
+          el.textContent = 'Zużycie: ' + used + ' / ' + limit + ' znaków.';
+        })
+        .withFailureHandler(function (e) {
+          el.textContent = formatScriptError(e);
+        })
+        .getDeepLUsage();
+    }
+
+    function formatDeepLSteps(result) {
+      var lines = [];
+      var steps = (result && result.steps) || [];
+      steps.forEach(function (s) {
+        lines.push(
+          '#' + s.step + ' ' + s.source_lang + ' → ' + s.target_lang +
+          ' (' + (s.billed_characters || '?') + ' znaków)'
+        );
+        lines.push(s.output);
+        lines.push('---');
+      });
+      if (result && result.final_text) {
+        lines.push('WYNIK: ' + result.final_text);
+      }
+      if (result && result.billed_characters != null) {
+        lines.push('Razem billed: ' + result.billed_characters);
+      }
+      return lines.join('\n');
+    }
+
+    function doDeepLTranslateSelection() {
+      var opts = collectDeepLOptionsFromForm();
+      var out = document.getElementById('deepl-result');
+      out.textContent = '';
+      setStatus('Tłumaczę zaznaczony tekst łańcuchem ' + deeplState.chain.join(' → ') + '…');
+      document.getElementById('btn-deepl-translate').disabled = true;
+      google.script.run
+        .withSuccessHandler(function () {
+          google.script.run
+            .withSuccessHandler(function () {
+              google.script.run
+                .withSuccessHandler(function (r) {
+                  document.getElementById('btn-deepl-translate').disabled = false;
+                  out.textContent = formatDeepLSteps(r);
+                  setStatus(
+                    'Przetłumaczono (' +
+                      ((r && r.chain) || deeplState.chain).join(' → ') +
+                      '). Zaznaczenie podmienione.'
+                  );
+                  refreshDeepLUsage();
+                })
+                .withFailureHandler(function (e) {
+                  document.getElementById('btn-deepl-translate').disabled = false;
+                  setStatus(formatScriptError(e), true);
+                })
+                .translateSelectedTextWithDeepL({
+                  chain: deeplState.chain,
+                  options: opts,
+                  source_lang: opts.source_lang,
+                });
+            })
+            .withFailureHandler(function (e) {
+              document.getElementById('btn-deepl-translate').disabled = false;
+              setStatus(formatScriptError(e), true);
+            })
+            .saveDeepLOptions(opts);
+        })
+        .withFailureHandler(function (e) {
+          document.getElementById('btn-deepl-translate').disabled = false;
+          setStatus(formatScriptError(e), true);
+        })
+        .saveDeepLChain(deeplState.chain);
+    }
+
+    function doDeepLPreviewSelection() {
+      var opts = collectDeepLOptionsFromForm();
+      var out = document.getElementById('deepl-result');
+      out.textContent = '';
+      setStatus('Podgląd łańcucha (bez podmiany w dokumencie)…');
+      google.script.run
+        .withSuccessHandler(function () {
+          google.script.run
+            .withSuccessHandler(function () {
+              google.script.run
+                .withSuccessHandler(function (r) {
+                  out.textContent = formatDeepLSteps(r);
+                  setStatus('Podgląd gotowy — dokument niezmieniony.');
+                })
+                .withFailureHandler(function (e) {
+                  setStatus(formatScriptError(e), true);
+                })
+                .previewSelectedTextWithDeepL({
+                  chain: deeplState.chain,
+                  options: opts,
+                  source_lang: opts.source_lang,
+                });
+            })
+            .withFailureHandler(function (e) {
+              setStatus(formatScriptError(e), true);
+            })
+            .saveDeepLOptions(opts);
+        })
+        .withFailureHandler(function (e) {
+          setStatus(formatScriptError(e), true);
+        })
+        .saveDeepLChain(deeplState.chain);
     }
 
     function boot() {

@@ -1,7 +1,9 @@
 # Panel Zotero20 (import + śledzone cytowania + bibliografia)
 
 Base URL: `https://zotero.keyweb.pl/api/v1`
-Wersja plików Apps Script: **2.2.6** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+Wersja plików Apps Script: **2.3.0** (`ADDON_VERSION` w `Code.gs` = `SIDEBAR_VERSION` w `Sidebar.html`).
+
+Zakładka **DeepL**: klucz API (Free/Pro), łańcuch języków A→B→C…, opcje (formalność, tagi, glossary, model), przycisk **Tłumacz zaznaczony tekst** (UrlFetch bezpośrednio do DeepL, tylko po kliknięciu).
 
 ## Co robi panel
 

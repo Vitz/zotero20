@@ -571,11 +571,12 @@
 
     <h3 style="margin:16px 0 6px;font-size:13px;">Wygląd cytowań w tekście</h3>
     <label style="display:flex;align-items:flex-start;gap:6px;font-weight:normal;margin-top:4px;">
-      <input id="inline-doi-mode" type="checkbox" onchange="persistInlineDoiMode()" style="margin-top:2px;">
+      <input id="inline-full-reference" type="checkbox" onchange="persistInlineFullReferenceMode()" style="margin-top:2px;">
       <span>
-        W tekście pokazuj <strong>[DOI]</strong> zamiast <code>[1]</code> / <code>(Autor, rok)</code>
+        W tekście wstawiaj <strong>pełne referencje</strong> zamiast <code>[1]</code> / <code>(Autor, rok)</code>
         <span class="hint" style="display:block;font-size:11px;color:#555;margin-top:2px;">
-          Np. <code>[10.14313/PAR_255/81]</code>. Po zmianie kliknij <strong>Zmień styl</strong>.
+          Np. <em>Smith, J. (2020). Title…</em> — literatura w miejscu cytowania, nie skrót.
+          Po zmianie kliknij <strong>Zmień styl</strong>.
         </span>
       </span>
     </label>
@@ -584,8 +585,8 @@
       <span>
         Bez bibliografii na końcu dokumentu
         <span class="hint" style="display:block;font-size:11px;color:#555;margin-top:2px;">
-          „Zmień styl” / wstawianie nie buduje sekcji Bibliografia (literatura zostaje w tekście jako DOI).
-          Możesz nadal wstawić ją ręcznie przyciskiem w zakładce Cytowania.
+          „Zmień styl” / wstawianie nie buduje sekcji Bibliografia na końcu
+          (sensowne z pełnymi referencjami w tekście). Możesz nadal wstawić ją ręcznie w zakładce Cytowania.
         </span>
       </span>
     </label>
@@ -681,7 +682,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.3.1';
+    var SIDEBAR_VERSION = '2.3.2';
 
     // UrlFetchApp: health co 5 min (wcześniej 3 s paliło dzienny limit).
     var HEALTH_POLL_MS = 300000;
@@ -1911,21 +1912,21 @@
         .saveCitationLocale(locale);
     }
 
-    function persistInlineDoiMode() {
-      var enabled = !!(document.getElementById('inline-doi-mode') || {}).checked;
+    function persistInlineFullReferenceMode() {
+      var enabled = !!(document.getElementById('inline-full-reference') || {}).checked;
       google.script.run
         .withSuccessHandler(function () {
           setStatus(
             enabled
-              ? 'Tryb [DOI] włączony. Kliknij „Zmień styl”, żeby przeliczyć cytowania w tekście.'
-              : 'Tryb [DOI] wyłączony. Kliknij „Zmień styl”, żeby wrócić do stylu CSL.',
+              ? 'Pełne referencje w tekście włączone. Kliknij „Zmień styl”, żeby przeliczyć cytowania.'
+              : 'Pełne referencje wyłączone. Kliknij „Zmień styl”, żeby wrócić do skrótów CSL.',
             false
           );
         })
         .withFailureHandler(function (e) {
           setStatus(formatScriptError(e), true);
         })
-        .saveInlineDoiMode(enabled);
+        .saveInlineFullReferenceMode(enabled);
     }
 
     function persistSkipEndBibliography() {
@@ -1987,8 +1988,10 @@
             var localeSel = document.getElementById('citation-locale');
             if (localeSel) localeSel.value = summary.locale;
           }
-          var inlineCb = document.getElementById('inline-doi-mode');
-          if (inlineCb) inlineCb.checked = !!summary.inline_doi;
+          var inlineCb = document.getElementById('inline-full-reference');
+          if (inlineCb) {
+            inlineCb.checked = !!(summary.inline_full_reference || summary.inline_doi);
+          }
           var skipBibCb = document.getElementById('skip-end-bibliography');
           if (skipBibCb) skipBibCb.checked = !!summary.skip_end_bibliography;
         })

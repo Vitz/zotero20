@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.3.1';
+const ADDON_VERSION = '2.3.2';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -14,7 +14,10 @@ const PROP_BIBLIOGRAPHY_FONT = 'ZOTERO20_BIBLIOGRAPHY_FONT';
 const PROP_BIBLIOGRAPHY_FONT_SIZE = 'ZOTERO20_BIBLIOGRAPHY_FONT_SIZE';
 const PROP_CITATION_INSERT_MODE = 'ZOTERO20_CITATION_INSERT_MODE';
 const PROP_CITATION_LOCALE = 'ZOTERO20_CITATION_LOCALE';
-const PROP_INLINE_DOI_MODE = 'ZOTERO20_INLINE_DOI_MODE';
+/** Pełne referencje w miejscu cytowania (dawniej błędnie: tryb [DOI]). */
+const PROP_INLINE_FULL_REFERENCE = 'ZOTERO20_INLINE_FULL_REFERENCE';
+/** Stary klucz — czytany tylko przy migracji. */
+const PROP_INLINE_DOI_MODE_LEGACY = 'ZOTERO20_INLINE_DOI_MODE';
 const PROP_SKIP_END_BIBLIOGRAPHY = 'ZOTERO20_SKIP_END_BIBLIOGRAPHY';
 const PROP_DEBUG = 'ZOTERO20_DEBUG';
 const PROP_GEMINI_API_KEY = 'ZOTERO20_GEMINI_API_KEY';
@@ -824,16 +827,30 @@ function saveCitationLocale(locale) {
   return getCitationLocale();
 }
 
+function getInlineFullReferenceMode() {
+  var props = PropertiesService.getDocumentProperties();
+  var current = props.getProperty(PROP_INLINE_FULL_REFERENCE);
+  if (current === 'true' || current === 'false') {
+    return current === 'true';
+  }
+  // Migracja ze starego (błędnego) trybu [DOI].
+  return props.getProperty(PROP_INLINE_DOI_MODE_LEGACY) === 'true';
+}
+
+function saveInlineFullReferenceMode(enabled) {
+  var props = PropertiesService.getDocumentProperties();
+  props.setProperty(PROP_INLINE_FULL_REFERENCE, enabled ? 'true' : 'false');
+  props.deleteProperty(PROP_INLINE_DOI_MODE_LEGACY);
+  return getInlineFullReferenceMode();
+}
+
+/** Alias wsteczny dla starego sidebara — ten sam przełącznik. */
 function getInlineDoiMode() {
-  return PropertiesService.getDocumentProperties().getProperty(PROP_INLINE_DOI_MODE) === 'true';
+  return getInlineFullReferenceMode();
 }
 
 function saveInlineDoiMode(enabled) {
-  PropertiesService.getDocumentProperties().setProperty(
-    PROP_INLINE_DOI_MODE,
-    enabled ? 'true' : 'false'
-  );
-  return getInlineDoiMode();
+  return saveInlineFullReferenceMode(enabled);
 }
 
 function getSkipEndBibliography() {
@@ -849,15 +866,6 @@ function saveSkipEndBibliography(enabled) {
     enabled ? 'true' : 'false'
   );
   return getSkipEndBibliography();
-}
-
-/** Tekst cytowania w trybie inline DOI: [10.1038/…] albo [?] gdy brak DOI. */
-function formatInlineDoiCitation_(doi) {
-  var normalized = normalizeDoiIdentifier_(doi);
-  if (normalized) {
-    return '[' + normalized + ']';
-  }
-  return '[?]';
 }
 
 function extractDoiFromItemPayload_(data) {
@@ -885,16 +893,25 @@ function getItemDoi_(itemKey) {
   }
 }
 
+/** Pełny wpis bibliograficzny pozycji (bez numeru [n] na początku). */
+function getItemBibliographyText_(itemKey, style) {
+  var key = normalizeItemKey_(itemKey);
+  if (!key) {
+    throw new Error('Brak klucza pozycji.');
+  }
+  var data = fetchDocumentCitations_([{ item_key: key }], style || getBibliographyStyle());
+  var text =
+    (data.bib_by_key && data.bib_by_key[key]) ||
+    '';
+  if (!text) {
+    throw new Error('Brak pełnej referencji dla pozycji ' + key + '.');
+  }
+  return text;
+}
+
 function resolveCitationDisplayText_(itemKey, style, identifiers) {
-  if (getInlineDoiMode()) {
-    var fromIds =
-      identifiers &&
-      String(identifiers.type || '').toLowerCase() === 'doi' &&
-      identifiers.value
-        ? normalizeDoiIdentifier_(identifiers.value)
-        : '';
-    var doi = fromIds || getItemDoi_(itemKey);
-    return formatInlineDoiCitation_(doi);
+  if (getInlineFullReferenceMode()) {
+    return getItemBibliographyText_(itemKey, style);
   }
   return getItemCitationText(itemKey, style);
 }
@@ -999,17 +1016,17 @@ function applyCitationStyle(styleId, options) {
   }
 
   var data = fetchDocumentCitations_(citations, style);
-  var inlineDoi = getInlineDoiMode();
-  var doiByKey = {};
-  if (inlineDoi) {
-    doiByKey = collectDoiByItemKey_(citations, data.item_keys);
-    Object.keys(doiByKey).forEach(function (k) {
-      data.citation_by_key[k] = formatInlineDoiCitation_(doiByKey[k]);
-    });
+  var inlineFull = getInlineFullReferenceMode();
+  var doiByKey = collectDoiByItemKey_(citations, data.item_keys);
+  if (inlineFull) {
     (data.item_keys || []).forEach(function (k) {
       var key = normalizeItemKey_(k);
-      if (key && !data.citation_by_key[key]) {
-        data.citation_by_key[key] = formatInlineDoiCitation_('');
+      if (!key) {
+        return;
+      }
+      var bib = (data.bib_by_key && data.bib_by_key[key]) || '';
+      if (bib) {
+        data.citation_by_key[key] = bib;
       }
     });
   }
@@ -1018,7 +1035,7 @@ function applyCitationStyle(styleId, options) {
     citations,
     data.citation_by_key,
     data.title_by_key,
-    !!data.numeric && !inlineDoi,
+    !!data.numeric && !inlineFull,
     doiByKey
   );
 
@@ -1027,7 +1044,7 @@ function applyCitationStyle(styleId, options) {
   var skipBib =
     options.skipBibliography ||
     getSkipEndBibliography() ||
-    (inlineDoi && options.createBibliography !== true);
+    (inlineFull && options.createBibliography !== true);
   if (skipBib) {
     bibliography = null;
   } else if (!data.entries.length) {
@@ -1048,8 +1065,9 @@ function applyCitationStyle(styleId, options) {
   var result = {
     style: data.style,
     style_label: data.style_label,
-    numeric: !!data.numeric && !inlineDoi,
-    inline_doi: inlineDoi,
+    numeric: !!data.numeric && !inlineFull,
+    inline_full_reference: inlineFull,
+    inline_doi: inlineFull,
     skip_end_bibliography: getSkipEndBibliography(),
     document_citation_count: citations.length,
     cited_count: data.item_keys.length,
@@ -1090,7 +1108,8 @@ function getDocumentCitationSummary() {
     style: getBibliographyStyle(),
     locale: getCitationLocale(),
     insert_mode: getCitationInsertMode(),
-    inline_doi: getInlineDoiMode(),
+    inline_full_reference: getInlineFullReferenceMode(),
+    inline_doi: getInlineFullReferenceMode(),
     skip_end_bibliography: getSkipEndBibliography(),
     citation_count: citations.length,
     item_count: keys.length,
@@ -1211,30 +1230,52 @@ function fetchDocumentCitations_(citations, style) {
     locale: getCitationLocale(),
   });
   var byKey = {};
+  var bibByKey = {};
   var titleByKey = {};
   var list = data.citations || [];
   var orderedKeys = (data.item_keys || keys).map(normalizeItemKey_);
   var entries = normalizeEntries_(data.entries);
+  if (data.bib_by_key && typeof data.bib_by_key === 'object') {
+    Object.keys(data.bib_by_key).forEach(function (rawKey) {
+      var k = normalizeItemKey_(rawKey);
+      var bib = String(data.bib_by_key[rawKey] || '').trim();
+      if (k && bib) {
+        bibByKey[k] = stripLeadingBibNumber_(bib);
+      }
+    });
+  }
   if (data.numeric) {
     for (var e = 0; e < orderedKeys.length; e++) {
       if (entries[e]) {
-        titleByKey[orderedKeys[e]] = stripLeadingBibNumber_(entries[e]);
+        var stripped = stripLeadingBibNumber_(entries[e]);
+        titleByKey[orderedKeys[e]] = stripped;
+        if (orderedKeys[e] && stripped && !bibByKey[orderedKeys[e]]) {
+          bibByKey[orderedKeys[e]] = stripped;
+        }
       }
     }
   }
   for (var i = 0; i < list.length; i++) {
     var text = String(list[i].citation_text || '').trim();
     var key = normalizeItemKey_(list[i].item_key);
+    var bibText = String(list[i].bibliography_text || '').trim();
     if (key && text) {
       byKey[key] = text;
+    }
+    if (key && bibText && !bibByKey[key]) {
+      bibByKey[key] = stripLeadingBibNumber_(bibText);
     }
     var fromCite = usefulHoverTitle_(text);
     if (key && fromCite) {
       titleByKey[key] = fromCite;
     }
+    if (key && bibByKey[key] && !titleByKey[key]) {
+      titleByKey[key] = usefulHoverTitle_(bibByKey[key]) || bibByKey[key];
+    }
   }
   return {
     citation_by_key: byKey,
+    bib_by_key: bibByKey,
     title_by_key: titleByKey,
     entries: entries,
     style: data.style || style,
@@ -1546,7 +1587,6 @@ function insertCitationForItem(itemKey, identifiers, mode) {
   var doiForLink =
     (placeholderIds && placeholderIds.type === 'doi' && placeholderIds.value) ||
     (identifiers && identifiers.type === 'doi' && identifiers.value) ||
-    (getInlineDoiMode() ? getItemDoi_(key) : '') ||
     '';
   doiForLink = normalizeDoiIdentifier_(doiForLink) || '';
   var placement =
@@ -1566,20 +1606,21 @@ function insertCitationForItem(itemKey, identifiers, mode) {
     item_key: key,
     citation_text: citationText,
     mode: placement.mode,
-    inline_doi: getInlineDoiMode(),
+    inline_full_reference: getInlineFullReferenceMode(),
+    inline_doi: getInlineFullReferenceMode(),
   };
 
   try {
     var skipBib =
       getSkipEndBibliography() ||
-      getInlineDoiMode() ||
+      getInlineFullReferenceMode() ||
       !hasBibliographySection_();
     var restyled = applyCitationStyle('', { skipBibliography: skipBib });
     result.cited_count = restyled.cited_count;
     result.numeric = restyled.numeric;
     result.bibliography_refreshed = !!restyled.bibliography;
-    if (restyled.inline_doi) {
-      // Tekst [DOI] ustala resolveCitationDisplayText_ / rewrite — nie nadpisuj numerem.
+    if (restyled.inline_full_reference || restyled.inline_doi) {
+      // Pełną referencję ustala resolveCitationDisplayText_ / rewrite — nie nadpisuj numerem.
     } else if (restyled.numeric) {
       result.citation_text = '[' + restyled.cited_count + ']';
     }

@@ -297,20 +297,36 @@ def build_document_citations(
         )
 
     citations: list[dict[str, str]] = []
+    bib_by_key: dict[str, str] = {}
     if numeric:
         entries = []
         for index, item_key in enumerate(present_keys, start=1):
             entry = strip_leading_number(formatted[item_key]["bib"])
+            bib_by_key[item_key] = entry
             entries.append(f"[{index}] {entry}")
-            citations.append({"item_key": item_key, "citation_text": f"[{index}]"})
+            citations.append(
+                {
+                    "item_key": item_key,
+                    "citation_text": f"[{index}]",
+                    "bibliography_text": entry,
+                }
+            )
     else:
         entries = sorted(
             (formatted[key]["bib"] for key in present_keys),
             key=lambda entry: entry.casefold(),
         )
         for item_key in present_keys:
-            citation = formatted[item_key]["citation"] or formatted[item_key]["bib"]
-            citations.append({"item_key": item_key, "citation_text": citation})
+            bib = strip_leading_number(formatted[item_key]["bib"])
+            bib_by_key[item_key] = bib
+            citation = formatted[item_key]["citation"] or bib
+            citations.append(
+                {
+                    "item_key": item_key,
+                    "citation_text": citation,
+                    "bibliography_text": bib,
+                }
+            )
 
     payload = {
         "source": source,
@@ -321,6 +337,7 @@ def build_document_citations(
         "item_count": len(entries),
         "item_keys": present_keys,
         "entries": entries,
+        "bib_by_key": bib_by_key,
         "citations": citations,
     }
     if missing_keys:

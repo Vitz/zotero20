@@ -171,9 +171,21 @@ class TestBuildDocumentCitations:
         )
         assert payload["numeric"] is True
         assert payload["citations"] == [
-            {"item_key": ITEM_KEY_2, "citation_text": "[1]"},
-            {"item_key": ITEM_KEY_1, "citation_text": "[2]"},
+            {
+                "item_key": ITEM_KEY_2,
+                "citation_text": "[1]",
+                "bibliography_text": "Kowalski, A. (2020). Entry B.",
+            },
+            {
+                "item_key": ITEM_KEY_1,
+                "citation_text": "[2]",
+                "bibliography_text": "Smith, J. (2013). Entry A.",
+            },
         ]
+        assert payload["bib_by_key"] == {
+            ITEM_KEY_2: "Kowalski, A. (2020). Entry B.",
+            ITEM_KEY_1: "Smith, J. (2013). Entry A.",
+        }
         assert payload["entries"] == [
             "[1] Kowalski, A. (2020). Entry B.",
             "[2] Smith, J. (2013). Entry A.",
@@ -202,6 +214,8 @@ class TestBuildDocumentCitations:
         assert payload["numeric"] is False
         assert [c["item_key"] for c in payload["citations"]] == [ITEM_KEY_2, ITEM_KEY_1]
         assert payload["citations"][0]["citation_text"] == "(Kowalski, 2020)"
+        assert payload["citations"][0]["bibliography_text"].startswith("Kowalski")
+        assert payload["bib_by_key"][ITEM_KEY_2].startswith("Kowalski")
         assert payload["entries"][0].startswith("Kowalski")
 
     def test_deduplicates_repeated_citations(self):

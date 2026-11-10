@@ -5,7 +5,7 @@
 
 const API_BASE = 'https://zotero.keyweb.pl/api/v1';
 // Podbij przy każdej zmianie Code.gs — sidebar porównuje wersje i ostrzega przy niezgodności.
-const ADDON_VERSION = '2.3.0';
+const ADDON_VERSION = '2.3.1';
 const PROP_DEFAULT_COLLECTION_KEY = 'ZOTERO20_DEFAULT_COLLECTION_KEY';
 const PROP_DEFAULT_COLLECTION_NAME = 'ZOTERO20_DEFAULT_COLLECTION_NAME';
 const PROP_BIBLIOGRAPHY_STYLE = 'ZOTERO20_BIBLIOGRAPHY_STYLE';
@@ -14,6 +14,8 @@ const PROP_BIBLIOGRAPHY_FONT = 'ZOTERO20_BIBLIOGRAPHY_FONT';
 const PROP_BIBLIOGRAPHY_FONT_SIZE = 'ZOTERO20_BIBLIOGRAPHY_FONT_SIZE';
 const PROP_CITATION_INSERT_MODE = 'ZOTERO20_CITATION_INSERT_MODE';
 const PROP_CITATION_LOCALE = 'ZOTERO20_CITATION_LOCALE';
+const PROP_INLINE_DOI_MODE = 'ZOTERO20_INLINE_DOI_MODE';
+const PROP_SKIP_END_BIBLIOGRAPHY = 'ZOTERO20_SKIP_END_BIBLIOGRAPHY';
 const PROP_DEBUG = 'ZOTERO20_DEBUG';
 const PROP_GEMINI_API_KEY = 'ZOTERO20_GEMINI_API_KEY';
 const PROP_DEEPL_API_KEY = 'ZOTERO20_DEEPL_API_KEY';
@@ -822,6 +824,81 @@ function saveCitationLocale(locale) {
   return getCitationLocale();
 }
 
+function getInlineDoiMode() {
+  return PropertiesService.getDocumentProperties().getProperty(PROP_INLINE_DOI_MODE) === 'true';
+}
+
+function saveInlineDoiMode(enabled) {
+  PropertiesService.getDocumentProperties().setProperty(
+    PROP_INLINE_DOI_MODE,
+    enabled ? 'true' : 'false'
+  );
+  return getInlineDoiMode();
+}
+
+function getSkipEndBibliography() {
+  return (
+    PropertiesService.getDocumentProperties().getProperty(PROP_SKIP_END_BIBLIOGRAPHY) ===
+    'true'
+  );
+}
+
+function saveSkipEndBibliography(enabled) {
+  PropertiesService.getDocumentProperties().setProperty(
+    PROP_SKIP_END_BIBLIOGRAPHY,
+    enabled ? 'true' : 'false'
+  );
+  return getSkipEndBibliography();
+}
+
+/** Tekst cytowania w trybie inline DOI: [10.1038/…] albo [?] gdy brak DOI. */
+function formatInlineDoiCitation_(doi) {
+  var normalized = normalizeDoiIdentifier_(doi);
+  if (normalized) {
+    return '[' + normalized + ']';
+  }
+  return '[?]';
+}
+
+function extractDoiFromItemPayload_(data) {
+  if (!data || typeof data !== 'object') {
+    return '';
+  }
+  var direct =
+    data.doi ||
+    data.DOI ||
+    (data.item && (data.item.doi || data.item.DOI)) ||
+    '';
+  return normalizeDoiIdentifier_(direct) || '';
+}
+
+function getItemDoi_(itemKey) {
+  var key = normalizeItemKey_(itemKey);
+  if (!key) {
+    return '';
+  }
+  try {
+    var data = apiGet('/items/' + encodeURIComponent(key));
+    return extractDoiFromItemPayload_(data);
+  } catch (e) {
+    return '';
+  }
+}
+
+function resolveCitationDisplayText_(itemKey, style, identifiers) {
+  if (getInlineDoiMode()) {
+    var fromIds =
+      identifiers &&
+      String(identifiers.type || '').toLowerCase() === 'doi' &&
+      identifiers.value
+        ? normalizeDoiIdentifier_(identifiers.value)
+        : '';
+    var doi = fromIds || getItemDoi_(itemKey);
+    return formatInlineDoiCitation_(doi);
+  }
+  return getItemCitationText(itemKey, style);
+}
+
 function getCitationInsertMode() {
   var mode = PropertiesService.getDocumentProperties().getProperty(PROP_CITATION_INSERT_MODE);
   return mode === 'placeholder' ? 'placeholder' : 'cursor';
@@ -922,16 +999,36 @@ function applyCitationStyle(styleId, options) {
   }
 
   var data = fetchDocumentCitations_(citations, style);
+  var inlineDoi = getInlineDoiMode();
+  var doiByKey = {};
+  if (inlineDoi) {
+    doiByKey = collectDoiByItemKey_(citations, data.item_keys);
+    Object.keys(doiByKey).forEach(function (k) {
+      data.citation_by_key[k] = formatInlineDoiCitation_(doiByKey[k]);
+    });
+    (data.item_keys || []).forEach(function (k) {
+      var key = normalizeItemKey_(k);
+      if (key && !data.citation_by_key[key]) {
+        data.citation_by_key[key] = formatInlineDoiCitation_('');
+      }
+    });
+  }
+
   var updated = rewriteCitationRuns_(
     citations,
     data.citation_by_key,
     data.title_by_key,
-    !!data.numeric
+    !!data.numeric && !inlineDoi,
+    doiByKey
   );
 
   var bibliography = null;
   var bibliographyError = '';
-  if (options.skipBibliography) {
+  var skipBib =
+    options.skipBibliography ||
+    getSkipEndBibliography() ||
+    (inlineDoi && options.createBibliography !== true);
+  if (skipBib) {
     bibliography = null;
   } else if (!data.entries.length) {
     bibliographyError = 'Serwer nie zwrócił wpisów bibliografii dla cytowanych pozycji.';
@@ -951,7 +1048,9 @@ function applyCitationStyle(styleId, options) {
   var result = {
     style: data.style,
     style_label: data.style_label,
-    numeric: !!data.numeric,
+    numeric: !!data.numeric && !inlineDoi,
+    inline_doi: inlineDoi,
+    skip_end_bibliography: getSkipEndBibliography(),
     document_citation_count: citations.length,
     cited_count: data.item_keys.length,
     updated: updated.updated,
@@ -991,12 +1090,38 @@ function getDocumentCitationSummary() {
     style: getBibliographyStyle(),
     locale: getCitationLocale(),
     insert_mode: getCitationInsertMode(),
+    inline_doi: getInlineDoiMode(),
+    skip_end_bibliography: getSkipEndBibliography(),
     citation_count: citations.length,
     item_count: keys.length,
     item_keys: keys,
     has_bibliography: hasBibliographySection_(),
     version: ADDON_VERSION,
   };
+}
+
+/** Mapa item_key → DOI z kotwic w dokumencie + uzupełnienie z API. */
+function collectDoiByItemKey_(citations, itemKeys) {
+  var map = {};
+  for (var i = 0; i < (citations || []).length; i++) {
+    var key = normalizeItemKey_(citations[i].item_key);
+    var doi = normalizeDoiIdentifier_(citations[i].doi || '');
+    if (key && doi && !map[key]) {
+      map[key] = doi;
+    }
+  }
+  var keys = itemKeys && itemKeys.length ? itemKeys : uniqueItemKeys_(citations || []);
+  for (var k = 0; k < keys.length; k++) {
+    var itemKey = normalizeItemKey_(keys[k]);
+    if (!itemKey || map[itemKey]) {
+      continue;
+    }
+    var fetched = getItemDoi_(itemKey);
+    if (fetched) {
+      map[itemKey] = fetched;
+    }
+  }
+  return map;
 }
 
 function insertBibliography(citedOnly) {
@@ -1403,7 +1528,7 @@ function insertCitationForItem(itemKey, identifiers, mode) {
   var style = getBibliographyStyle();
   var citationText = '';
   try {
-    citationText = getItemCitationText(key, style);
+    citationText = resolveCitationDisplayText_(key, style, identifiers || {});
   } catch (e) {
     throw new Error('Nie udało się pobrać cytowania: ' + (e.message || String(e)));
   }
@@ -1418,10 +1543,22 @@ function insertCitationForItem(itemKey, identifiers, mode) {
   if (mode === 'placeholder') {
     placeholderIds = enrichIdentifiersForPlaceholder_(placeholderIds, key);
   }
+  var doiForLink =
+    (placeholderIds && placeholderIds.type === 'doi' && placeholderIds.value) ||
+    (identifiers && identifiers.type === 'doi' && identifiers.value) ||
+    (getInlineDoiMode() ? getItemDoi_(key) : '') ||
+    '';
+  doiForLink = normalizeDoiIdentifier_(doiForLink) || '';
   var placement =
     mode === 'placeholder'
-      ? replacePlaceholderInDocument_(citationText, placeholderIds, key, hoverTitle)
-      : insertCitationAtCursor_(citationText, key, hoverTitle);
+      ? replacePlaceholderInDocument_(
+          citationText,
+          placeholderIds,
+          key,
+          hoverTitle,
+          doiForLink
+        )
+      : insertCitationAtCursor_(citationText, key, hoverTitle, doiForLink);
 
   var result = {
     replaced: true,
@@ -1429,14 +1566,21 @@ function insertCitationForItem(itemKey, identifiers, mode) {
     item_key: key,
     citation_text: citationText,
     mode: placement.mode,
+    inline_doi: getInlineDoiMode(),
   };
 
   try {
-    var restyled = applyCitationStyle('', { skipBibliography: !hasBibliographySection_() });
+    var skipBib =
+      getSkipEndBibliography() ||
+      getInlineDoiMode() ||
+      !hasBibliographySection_();
+    var restyled = applyCitationStyle('', { skipBibliography: skipBib });
     result.cited_count = restyled.cited_count;
     result.numeric = restyled.numeric;
     result.bibliography_refreshed = !!restyled.bibliography;
-    if (restyled.numeric) {
+    if (restyled.inline_doi) {
+      // Tekst [DOI] ustala resolveCitationDisplayText_ / rewrite — nie nadpisuj numerem.
+    } else if (restyled.numeric) {
       result.citation_text = '[' + restyled.cited_count + ']';
     }
   } catch (e) {
@@ -1462,7 +1606,7 @@ function showPasteAlert(message, isError) {
  * Gdy podano itemKey, cytowanie dostaje kotwicę-link i jest dalej śledzone.
  * Kolejność: [*], potem [identyfikator] dopasowany do importu.
  */
-function replacePlaceholderInDocument_(text, identifiers, itemKey, hoverTitle) {
+function replacePlaceholderInDocument_(text, identifiers, itemKey, hoverTitle, doi) {
   identifiers = identifiers || {};
   var body = DocumentApp.getActiveDocument().getBody();
   var patterns = buildPlaceholderPatterns_(identifiers);
@@ -1477,7 +1621,8 @@ function replacePlaceholderInDocument_(text, identifiers, itemKey, hoverTitle) {
           result.end,
           itemKey,
           newCitationId_(),
-          hoverTitle
+          hoverTitle,
+          doi
         );
       }
       return { mode: 'placeholder', pattern: patterns[i], text: text, item_key: itemKey || '' };
@@ -1491,7 +1636,7 @@ function replacePlaceholderInDocument_(text, identifiers, itemKey, hoverTitle) {
 }
 
 /** Wstawia cytowanie tam, gdzie stoi kursor w dokumencie. */
-function insertCitationAtCursor_(text, itemKey, hoverTitle) {
+function insertCitationAtCursor_(text, itemKey, hoverTitle, doi) {
   var doc = DocumentApp.getActiveDocument();
   var cursor = doc.getCursor();
   if (!cursor) {
@@ -1514,7 +1659,8 @@ function insertCitationAtCursor_(text, itemKey, hoverTitle) {
     offset + text.length - 1,
     itemKey,
     newCitationId_(),
-    hoverTitle
+    hoverTitle,
+    doi
   );
   return { mode: 'cursor', text: text, item_key: itemKey };
 }
@@ -1523,7 +1669,7 @@ function newCitationId_() {
   return Utilities.getUuid().replace(/-/g, '').substring(0, 12);
 }
 
-function buildCitationUrl_(itemKey, citationId, displayTitle) {
+function buildCitationUrl_(itemKey, citationId, displayTitle, doi) {
   var url =
     CITE_LINK_BASE +
     encodeURIComponent(normalizeItemKey_(itemKey)) +
@@ -1532,6 +1678,10 @@ function buildCitationUrl_(itemKey, citationId, displayTitle) {
   var title = sanitizeCiteTitle_(displayTitle);
   if (title) {
     url += '&t=' + encodeURIComponent(title);
+  }
+  var normalizedDoi = normalizeDoiIdentifier_(doi);
+  if (normalizedDoi) {
+    url += '&d=' + encodeURIComponent(normalizedDoi);
   }
   return url;
 }
@@ -1618,7 +1768,23 @@ function parseCitationUrl_(url) {
       displayTitle = titleMatch[1];
     }
   }
-  return { itemKey: itemKey, citationId: citationId, displayTitle: displayTitle };
+  var doi = '';
+  var doiMatch = /[?&]d=([^&#]*)/i.exec(String(url));
+  if (doiMatch && doiMatch[1]) {
+    try {
+      doi = normalizeDoiIdentifier_(
+        decodeURIComponent(String(doiMatch[1]).replace(/\+/g, ' '))
+      );
+    } catch (e) {
+      doi = normalizeDoiIdentifier_(doiMatch[1]);
+    }
+  }
+  return {
+    itemKey: itemKey,
+    citationId: citationId,
+    displayTitle: displayTitle,
+    doi: doi || '',
+  };
 }
 
 function linkUrlAtOffset_(textElement, start, end) {
@@ -1637,11 +1803,15 @@ function linkUrlAtOffset_(textElement, start, end) {
  * Nakłada kotwicę cytowania i zdejmuje domyślny wygląd hiperłącza,
  * żeby cytowanie w tekście wyglądało jak zwykły tekst.
  */
-function applyCitationLink_(textElement, start, end, itemKey, citationId, displayTitle) {
+function applyCitationLink_(textElement, start, end, itemKey, citationId, displayTitle, doi) {
   if (end < start) {
     return;
   }
-  textElement.setLinkUrl(start, end, buildCitationUrl_(itemKey, citationId, displayTitle));
+  textElement.setLinkUrl(
+    start,
+    end,
+    buildCitationUrl_(itemKey, citationId, displayTitle, doi)
+  );
   textElement.setUnderline(start, end, false);
   textElement.setForegroundColor(start, end, '#000000');
 }
@@ -1723,6 +1893,7 @@ function collectRunsFromText_(textElement, runs) {
       item_key: meta.itemKey,
       citation_id: meta.citationId,
       display_title: meta.displayTitle || '',
+      doi: meta.doi || '',
     };
     runs.push(current);
   }
@@ -1819,9 +1990,10 @@ function extractNumericCitationNumber_(text) {
   return match ? parseInt(match[1], 10) : null;
 }
 
-function buildCitationGroupMembers_(group, citationByKey, titleByKey) {
+function buildCitationGroupMembers_(group, citationByKey, titleByKey, doiByKey) {
   var members = [];
   var seen = {};
+  doiByKey = doiByKey || {};
   for (var i = 0; i < group.length; i++) {
     var itemKey = normalizeItemKey_(group[i].item_key);
     var newText = citationByKey[itemKey];
@@ -1841,6 +2013,9 @@ function buildCitationGroupMembers_(group, citationByKey, titleByKey) {
         titleByKey[itemKey] || '',
         group[i].display_title || ''
       ),
+      doi: normalizeDoiIdentifier_(
+        group[i].doi || doiByKey[itemKey] || ''
+      ),
       number: extractNumericCitationNumber_(newText),
     });
   }
@@ -1855,24 +2030,37 @@ function buildCitationGroupMembers_(group, citationByKey, titleByKey) {
  * na cyfrach (nawiasy i przecinki bez kotwicy). Zakresów [1-3] nie robimy —
  * środkowa pozycja zniknęłaby z dokumentu i skaner by ją zgubił.
  */
-function rewriteCitationRuns_(runs, citationByKey, titleByKey, numeric) {
+function rewriteCitationRuns_(runs, citationByKey, titleByKey, numeric, doiByKey) {
   var updated = 0;
   var unchanged = 0;
   var skipped = 0;
   var collapsed = 0;
   var normalizedMap = {};
   var normalizedTitles = {};
+  var normalizedDois = {};
   Object.keys(citationByKey || {}).forEach(function (k) {
     normalizedMap[normalizeItemKey_(k)] = citationByKey[k];
   });
   Object.keys(titleByKey || {}).forEach(function (k) {
     normalizedTitles[normalizeItemKey_(k)] = titleByKey[k];
   });
+  Object.keys(doiByKey || {}).forEach(function (k) {
+    var dk = normalizeItemKey_(k);
+    var dv = normalizeDoiIdentifier_(doiByKey[k]);
+    if (dk && dv) {
+      normalizedDois[dk] = dv;
+    }
+  });
 
   var groups = groupAdjacentCitationRuns_(runs);
   for (var g = groups.length - 1; g >= 0; g--) {
     var group = groups[g];
-    var members = buildCitationGroupMembers_(group, normalizedMap, normalizedTitles);
+    var members = buildCitationGroupMembers_(
+      group,
+      normalizedMap,
+      normalizedTitles,
+      normalizedDois
+    );
     if (!members.length) {
       skipped += group.length;
       continue;
@@ -1917,11 +2105,17 @@ function writeSingleCitationRun_(group, member) {
       bounds.start + newText.length - 1,
       member.itemKey,
       member.citationId,
-      member.hoverTitle
+      member.hoverTitle,
+      member.doi
     );
     return { updated: 1 };
   }
-  var nextUrl = buildCitationUrl_(member.itemKey, member.citationId, member.hoverTitle);
+  var nextUrl = buildCitationUrl_(
+    member.itemKey,
+    member.citationId,
+    member.hoverTitle,
+    member.doi
+  );
   var url = linkUrlAtOffset_(te, bounds.start, bounds.end);
   if (nextUrl !== url) {
     applyCitationLink_(
@@ -1930,7 +2124,8 @@ function writeSingleCitationRun_(group, member) {
       bounds.end,
       member.itemKey,
       member.citationId,
-      member.hoverTitle
+      member.hoverTitle,
+      member.doi
     );
   }
   return { unchanged: 1 };
@@ -1960,7 +2155,8 @@ function writeExpandedCitationGroup_(group, members) {
         bounds.start + spans[u].end,
         spans[u].member.itemKey,
         spans[u].member.citationId,
-        spans[u].member.hoverTitle
+        spans[u].member.hoverTitle,
+        spans[u].member.doi
       );
     }
     return { unchanged: members.length };
@@ -1975,7 +2171,8 @@ function writeExpandedCitationGroup_(group, members) {
       bounds.start + spans[s].end,
       spans[s].member.itemKey,
       spans[s].member.citationId,
-      spans[s].member.hoverTitle
+      spans[s].member.hoverTitle,
+      spans[s].member.doi
     );
   }
   return { updated: members.length };
@@ -2021,7 +2218,8 @@ function writeCollapsedNumericCitationGroup_(group, members) {
       bounds.start + spans[s].end,
       spans[s].member.itemKey,
       spans[s].member.citationId,
-      spans[s].member.hoverTitle
+      spans[s].member.hoverTitle,
+      spans[s].member.doi
     );
   }
   return textChanged

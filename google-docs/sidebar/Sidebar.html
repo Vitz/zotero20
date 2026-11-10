@@ -569,6 +569,27 @@
       <option value="placeholder">Zamiast [*] lub [DOI] w tekście</option>
     </select>
 
+    <h3 style="margin:16px 0 6px;font-size:13px;">Wygląd cytowań w tekście</h3>
+    <label style="display:flex;align-items:flex-start;gap:6px;font-weight:normal;margin-top:4px;">
+      <input id="inline-doi-mode" type="checkbox" onchange="persistInlineDoiMode()" style="margin-top:2px;">
+      <span>
+        W tekście pokazuj <strong>[DOI]</strong> zamiast <code>[1]</code> / <code>(Autor, rok)</code>
+        <span class="hint" style="display:block;font-size:11px;color:#555;margin-top:2px;">
+          Np. <code>[10.14313/PAR_255/81]</code>. Po zmianie kliknij <strong>Zmień styl</strong>.
+        </span>
+      </span>
+    </label>
+    <label style="display:flex;align-items:flex-start;gap:6px;font-weight:normal;margin-top:8px;">
+      <input id="skip-end-bibliography" type="checkbox" onchange="persistSkipEndBibliography()" style="margin-top:2px;">
+      <span>
+        Bez bibliografii na końcu dokumentu
+        <span class="hint" style="display:block;font-size:11px;color:#555;margin-top:2px;">
+          „Zmień styl” / wstawianie nie buduje sekcji Bibliografia (literatura zostaje w tekście jako DOI).
+          Możesz nadal wstawić ją ręcznie przyciskiem w zakładce Cytowania.
+        </span>
+      </span>
+    </label>
+
     <h3 style="margin:16px 0 6px;font-size:13px;">Wygląd bibliografii</h3>
     <label for="biblio-font">Czcionka</label>
     <select id="biblio-font" onchange="persistBibliographyFont()">
@@ -660,7 +681,7 @@
 
   <script>
     // Musi się zgadzać z ADDON_VERSION w Code.gs — inaczej pliki skopiowano niekompletnie.
-    var SIDEBAR_VERSION = '2.3.0';
+    var SIDEBAR_VERSION = '2.3.1';
 
     // UrlFetchApp: health co 5 min (wcześniej 3 s paliło dzienny limit).
     var HEALTH_POLL_MS = 300000;
@@ -1890,6 +1911,40 @@
         .saveCitationLocale(locale);
     }
 
+    function persistInlineDoiMode() {
+      var enabled = !!(document.getElementById('inline-doi-mode') || {}).checked;
+      google.script.run
+        .withSuccessHandler(function () {
+          setStatus(
+            enabled
+              ? 'Tryb [DOI] włączony. Kliknij „Zmień styl”, żeby przeliczyć cytowania w tekście.'
+              : 'Tryb [DOI] wyłączony. Kliknij „Zmień styl”, żeby wrócić do stylu CSL.',
+            false
+          );
+        })
+        .withFailureHandler(function (e) {
+          setStatus(formatScriptError(e), true);
+        })
+        .saveInlineDoiMode(enabled);
+    }
+
+    function persistSkipEndBibliography() {
+      var enabled = !!(document.getElementById('skip-end-bibliography') || {}).checked;
+      google.script.run
+        .withSuccessHandler(function () {
+          setStatus(
+            enabled
+              ? 'Bibliografia na końcu wyłączona (przy zmianie stylu / wstawianiu).'
+              : 'Bibliografia na końcu znów może być odświeżana przy zmianie stylu.',
+            false
+          );
+        })
+        .withFailureHandler(function (e) {
+          setStatus(formatScriptError(e), true);
+        })
+        .saveSkipEndBibliography(enabled);
+    }
+
     function isWholeCollectionMode() {
       var cb = document.getElementById('biblio-whole-collection');
       return cb ? !!cb.checked : appState.wholeCollection;
@@ -1932,6 +1987,10 @@
             var localeSel = document.getElementById('citation-locale');
             if (localeSel) localeSel.value = summary.locale;
           }
+          var inlineCb = document.getElementById('inline-doi-mode');
+          if (inlineCb) inlineCb.checked = !!summary.inline_doi;
+          var skipBibCb = document.getElementById('skip-end-bibliography');
+          if (skipBibCb) skipBibCb.checked = !!summary.skip_end_bibliography;
         })
         .withFailureHandler(function () {
           var el = document.getElementById('citation-summary');
